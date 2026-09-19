@@ -7,10 +7,13 @@ import { MapContainer, Marker, Pane, Polygon, Popup, TileLayer, Tooltip, ZoomCon
 import {
   FACTORS,
   factorRanks,
+  factorHelp,
+  type BusinessType,
   scoreColor,
   scoreRange,
   type ZipResult,
 } from "../lib/supabase";
+import { FactorHelp } from "./FactorHelp";
 
 /** "map" = marker click, "area" = zip outline click, "list" = sidebar click. */
 export type SelectSource = "map" | "area" | "list";
@@ -189,11 +192,13 @@ function ZipMarker({
   selected,
   t,
   ranks,
+  type,
   onHover,
   onSelect,
   onClose,
   registerRef,
 }: {
+  type: BusinessType;
   r: ZipResult;
   at: [number, number] | undefined;
   rank: number;
@@ -272,7 +277,18 @@ function ZipMarker({
             {FACTORS.map((f) => (
               <div key={f.key} className="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1">
                 <dt className="text-xs text-ink-2">
-                  {f.label} <span className="text-ink-3">×{f.weight}</span>
+                  <FactorHelp
+                    label={
+                      <>
+                        {f.label} <span className="text-ink-3">×{f.weight}</span>
+                      </>
+                    }
+                    help={factorHelp(f.key, type, r)}
+                    weight={f.weight}
+                    rank={ranks?.[f.key]}
+                    total={total}
+                    focusable
+                  />
                 </dt>
                 <dd className="tnum text-xs font-semibold text-ink">
                   {r[f.key].toFixed(0)}
@@ -302,7 +318,9 @@ export default function ZipMap({
   selectSource,
   onHover,
   onSelect,
+  type,
 }: {
+  type: BusinessType;
   results: ZipResult[];
   topN: number;
   hoverZip: string | null;
@@ -372,6 +390,7 @@ export default function ZipMap({
           // Leaflet doesn't update a marker's title after creation; remount when the rank changes
           key={`${r.zip}:${i}`}
           r={r}
+          type={type}
           at={labelAt.get(r.zip)}
           rank={i + 1}
           total={results.length}

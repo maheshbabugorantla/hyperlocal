@@ -34,6 +34,7 @@ export type ZipResult = {
   population: number;
   median_income: number | null;
   pct_hh_income_75k_plus: number;
+  pop_20_44: number;
   demand_score: number;
   competition_score: number;
   traffic_score: number;
@@ -97,6 +98,7 @@ export async function fetchResults(type: BusinessType): Promise<ZipResult[]> {
         population: l.population,
         median_income: l.median_income,
         pct_hh_income_75k_plus: Number(l.pct_hh_income_75k_plus),
+        pop_20_44: l.pop_20_44,
         demand_score: Number(s.demand_score),
         competition_score: Number(s.competition_score),
         traffic_score: Number(s.traffic_score),
@@ -172,4 +174,62 @@ export function factorRanks(results: ZipResult[]) {
     });
   }
   return ranks;
+}
+
+/* ---------------- Score explanations (mirror pipeline/pipeline.py) ---------------- */
+
+const POP_CAP = 20000; // DEMAND_POP_20_44_CAP
+const COMPETITION_SATURATION = 60;
+const TRAFFIC_REVIEWS_CAP = 20000;
+
+/** Per-type demand profile; null = the original 20–44 + $75k+ signal. */
+const DEMAND_PROFILES: Partial<Record<BusinessType, { ages: string[]; agesText: string; incomes: string[] | null; incomesText: string }>> = {
+  "med spa": { ages: ["35–44", "45–64"], agesText: "adults 35–64", incomes: ["$100–150k", "$150–200k", "$200k+"], incomesText: "earning $100k+" },
+  "tattoo shop": { ages: ["18–24", "25–34"], agesText: "adults 18–34", incomes: null, incomesText: "" },
+  laundromat: { ages: ["18–24", "25–34"], agesText: "adults 18–34", incomes: ["<$25k", "$25–50k"], incomesText: "earning under $50k" },
+};
+
+const fmt = (n: number) => Math.round(n).toLocaleString();
+const pct = (x: number) => `${Math.round(x * 100)}%`;
+const sumBands = (bands: Band[] | null, labels: string[]) =>
+  (bands ?? []).filter((b) => labels.includes(b.label)).reduce((a, b) => a + b.count, 0);
+
+export type FactorHelpText = { how: string; here: string };
+
+/** Plain-English "how is this computed" plus this zip's own inputs, for one factor. */
+export function factorHelp(key: FactorKey, type: BusinessType, r: ZipResult): FactorHelpText {
+  if (key === "demand_score") {
+    const p = DEMAND_PROFILES[type];
+    if (!p) {
+      return {
+        how: `How many likely customers live here. Half comes from adults aged 20–44 (full marks at ${fmt(POP_CAP)}), half from the share of households earning $75k+. Census ACS 2020–24.`,
+        here: `${fmt(r.pop_20_44)} adults 20–44 · ${pct(r.pct_hh_income_75k_plus)} of households earn $75k+`,
+      };
+    }
+    const people = sumBands(r.age_bands, p.ages);
+    if (!p.incomes) {
+      return {
+        how: `How many likely customers live here: ${p.agesText}, any income. Full marks at ${fmt(POP_CAP)} people. Census ACS 2020–24.`,
+        here: `${fmt(people)} ${p.agesText} live here`,
+      };
+    }
+    const households = (r.income_brackets ?? []).reduce((a, b) => a + b.count, 0);
+    const share = households ? sumBands(r.income_brackets, p.incomes) / households : 0;
+    return {
+      how: `How many likely customers live here. Half comes from ${p.agesText} (full marks at ${fmt(POP_CAP)}), half from the share of households ${p.incomesText}. Census ACS 2020–24.`,
+      here: `${fmt(people)} ${p.agesText} · ${pct(share)} of households ${p.incomesText}`,
+    };
+  }
+  if (key === "competition_score") {
+    return {
+      how: `Room left in the market. Starts at 100 with no similar businesses inside the zip and drops about ${(100 / COMPETITION_SATURATION).toFixed(1)} points per competitor, reaching 0 at ${COMPETITION_SATURATION}+. Counted from Google Maps.`,
+      here: `${r.competitor_count} ${r.competitor_count === 1 ? "competitor" : "competitors"} found in ${r.zip}`,
+    };
+  }
+  // Traffic: invert the log scale to recover the approximate review total behind the score.
+  const reviews = Math.pow(10, (r.traffic_score / 100) * Math.log10(1 + TRAFFIC_REVIEWS_CAP)) - 1;
+  return {
+    how: `How busy the area already is. Adds up the Google reviews of similar businesses here as a foot-traffic proxy, on a log scale: ~100 reviews ≈ 47, ~1,000 ≈ 70, ${fmt(TRAFFIC_REVIEWS_CAP)}+ = 100. No businesses means 0.`,
+    here: r.competitor_count === 0 ? "No similar businesses here, so no reviews to count" : `≈ ${fmt(reviews)} reviews across ${r.competitor_count} ${r.competitor_count === 1 ? "place" : "places"}`,
+  };
 }

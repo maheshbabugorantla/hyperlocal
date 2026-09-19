@@ -7,6 +7,7 @@ import {
   DEMAND_MEANS,
   FACTORS,
   factorRanks,
+  factorHelp,
   fetchResults,
   scoreColor,
   scoreRange,
@@ -17,6 +18,7 @@ import {
 import type { SelectSource } from "./ZipMap";
 import ZipDetail, { fieldAverages } from "./ZipDetail";
 import { TypeIcon } from "./TypeIcons";
+import { FactorHelp } from "./FactorHelp";
 
 const ZipMap = dynamic(() => import("./ZipMap"), {
   ssr: false,
@@ -82,9 +84,9 @@ function FactorBars({
   r,
   ranks,
   total,
-  demandMeans,
+  type,
 }: {
-  demandMeans: string;
+  type: BusinessType;
   r: ZipResult;
   ranks: Record<FactorKey, number> | undefined;
   total: number;
@@ -93,15 +95,19 @@ function FactorBars({
   const standout = ranks ? FACTORS.reduce((a, b) => (ranks[b.key] < ranks[a.key] ? b : a)).key : null;
   return (
     <dl className="grid grid-cols-3 gap-x-4">
-      {FACTORS.map((f) => {
+      {FACTORS.map((f, i) => {
         const isStandout = f.key === standout;
         return (
           <div key={f.key} className="min-w-0">
-            <dt
-              title={f.key === "demand_score" ? `Demand = ${demandMeans}` : undefined}
-              className={`truncate text-[11.5px] leading-tight ${isStandout ? "font-semibold text-ink" : "text-ink-2"}`}
-            >
-              {f.label}
+            <dt className={`text-[11.5px] leading-tight ${isStandout ? "font-semibold text-ink" : "text-ink-2"}`}>
+              <FactorHelp
+                label={f.label}
+                help={factorHelp(f.key, type, r)}
+                weight={f.weight}
+                rank={ranks?.[f.key]}
+                total={total}
+                align={i === FACTORS.length - 1 ? "right" : "left"}
+              />
             </dt>
             <dd className="mt-1">
               <div className="h-[5px] rounded-full bg-line">
@@ -230,6 +236,7 @@ export default function Dashboard() {
             selectSource={selected?.source ?? null}
             onHover={setHoverZip}
             onSelect={(zip, source) => setSelected(zip ? { zip, source } : null)}
+            type={type}
           />
         )}
 
@@ -365,7 +372,7 @@ export default function Dashboard() {
                             </span>
 
                             <span className="mt-3 block border-t border-line pt-2.5">
-                              <FactorBars r={r} ranks={ranks.get(r.zip)} total={results.length} demandMeans={DEMAND_MEANS[type]} />
+                              <FactorBars r={r} ranks={ranks.get(r.zip)} total={results.length} type={type} />
                             </span>
                             <span className="mt-3 flex items-center gap-1.5 text-[12.5px] font-semibold text-brand-deep">
                               {expandedZip === r.zip ? "Hide detail" : "Residents, income, vibe, competitors"}

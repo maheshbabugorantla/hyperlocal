@@ -62,9 +62,9 @@ Other pipeline commands. None of them scrape, so they're free apart from Gemini:
 | Web app | Next.js 16 (App Router), React 19, Tailwind 4, react-leaflet 5 with Esri light-gray tiles, deployed on Vercel |
 | AI | Google Gemini Flash writes each zip's analysis and neighborhood vibe, grounded only in the data it's given |
 
-![Hyperlocal system design](docs/diagrams/system-design.png)
+![Hyperlocal system architecture](docs/diagrams/system-architecture.png)
 
-![Hyperlocal data pipeline](docs/diagrams/data-pipeline.png)
+Vector version: [`docs/diagrams/system-architecture.svg`](docs/diagrams/system-architecture.svg).
 
 Plain-text version:
 

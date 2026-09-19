@@ -48,3 +48,8 @@ create policy "public read" on locations for select using (true);
 create policy "public read" on competitors for select using (true);
 create policy "public read" on scores for select using (true);
 create policy "public read" on insights for select using (true);
+
+-- Detail panel (added after v1): demographic shape per zip and a grounded "vibe" read.
+alter table locations add column if not exists age_bands jsonb;
+alter table locations add column if not exists income_brackets jsonb;
+alter table insights add column if not exists vibe text;

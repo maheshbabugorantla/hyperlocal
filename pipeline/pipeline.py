@@ -5,6 +5,7 @@ Usage:
   python pipeline.py run --zip 78702 --type "coffee shop" # Ticket 1: one combination
   python pipeline.py run --all                           # Ticket 2: 17 zips x 3 types + insights
   python pipeline.py insights                            # regenerate insights only
+  python pipeline.py enrich                              # age/income shape + vibes (no scraping)
   python pipeline.py rescore                             # recompute scores from stored data
   python pipeline.py schema                              # create tables (needs SUPABASE_DB_PASSWORD)
 """
@@ -164,14 +165,50 @@ def acs(get, zip_code):
     return dict(zip(header, values))
 
 
+# ACS variable ranges per band; female B01001 codes are male codes + 24.
+AGE_BANDS = [
+    ("Under 18", range(3, 7)),
+    ("18–24", range(7, 11)),
+    ("25–34", range(11, 13)),
+    ("35–44", range(13, 15)),
+    ("45–64", range(15, 20)),
+    ("65+", range(20, 26)),
+]
+INCOME_BRACKETS = [
+    ("<$25k", range(2, 6)),
+    ("$25–50k", range(6, 11)),
+    ("$50–75k", range(11, 13)),
+    ("$75–100k", range(13, 14)),
+    ("$100–150k", range(14, 16)),
+    ("$150–200k", range(16, 17)),
+    ("$200k+", range(17, 18)),
+]
+
+
+def acs_count(table, var):
+    value = int(float(table[var]))
+    return value if value >= 0 else 0  # Census uses large negatives for "not available"
+
+
+def demographic_shape(age, income):
+    return {
+        "age_bands": [
+            {"label": label, "count": sum(acs_count(age, f"B01001_{i:03d}E") + acs_count(age, f"B01001_{i + 24:03d}E") for i in r)}
+            for label, r in AGE_BANDS
+        ],
+        "income_brackets": [
+            {"label": label, "count": sum(acs_count(income, f"B19001_{i:03d}E") for i in r)}
+            for label, r in INCOME_BRACKETS
+        ],
+    }
+
+
 def demographics(zip_code):
     age = acs("group(B01001)", zip_code)
     income = acs("group(B19001)", zip_code)
     median = acs("B19013_001E", zip_code)
 
-    def n(table, var):
-        value = int(float(table[var]))
-        return value if value >= 0 else 0  # Census uses large negatives for "not available"
+    n = acs_count
 
     male_20_44 = sum(n(age, f"B01001_{i:03d}E") for i in range(8, 15))
     female_20_44 = sum(n(age, f"B01001_{i:03d}E") for i in range(32, 39))
@@ -190,6 +227,7 @@ def demographics(zip_code):
         "pop_20_44": male_20_44 + female_20_44,
         "median_income": median_income if median_income > 0 else None,
         "pct_hh_income_75k_plus": round(hh_75k_plus / households, 4) if households else 0,
+        **demographic_shape(age, income),
     }
 
 
@@ -371,6 +409,53 @@ def generate_insights(db=None):
                 print(f"  FAILED insight {business_type} {score['zip']}: {exc}")
 
 
+def vibe_prompt(loc, businesses):
+    lines = "\n".join(
+        f"- {b['name']} ({b['category']}), rating {b['rating']}, {b['review_count']} reviews"
+        for b in businesses[:40]
+    )
+    return f"""Below is every coffee shop, food truck and boutique we found on Google Maps inside Austin zip
+{loc['zip']} ({loc['name']}), most-reviewed first. Using ONLY this list (no outside knowledge about the
+neighborhood, no landmarks, no history), describe the neighborhood's commercial vibe in 2 short sentences,
+under 45 words: what kind of places dominate, and what that suggests about who goes there.
+If the list is short, say the area is thin on these businesses. No preamble.
+
+{lines or '- (no businesses found)'}"""
+
+
+def generate_vibes(db=None):
+    """One grounded 'vibe' line per zip that has an insight, written to every insight row for that zip."""
+    db = db or supabase()
+    client = gemini()
+    zips = sorted({r["zip"] for r in db.table("insights").select("zip").execute().data})
+    for zip_code in zips:
+        try:
+            loc = db.table("locations").select("*").eq("zip", zip_code).execute().data[0]
+            businesses = (
+                db.table("competitors").select("name,category,rating,review_count").eq("zip", zip_code)
+                .order("review_count", desc=True).limit(40).execute().data
+            )
+            text = client.models.generate_content(model=GEMINI_MODEL, contents=vibe_prompt(loc, businesses)).text.strip()
+            db.table("insights").update({"vibe": text}).eq("zip", zip_code).execute()
+            print(f"  vibe {zip_code}: {text[:90]}...")
+        except Exception as exc:  # noqa: BLE001
+            print(f"  FAILED vibe {zip_code}: {exc}")
+
+
+def enrich(db=None):
+    """Backfill demographic shape for every stored zip, then vibes. Census + Gemini only, no scraping."""
+    db = db or supabase()
+    for row in db.table("locations").select("zip").execute().data:
+        z = row["zip"]
+        try:
+            shape = demographic_shape(acs("group(B01001)", z), acs("group(B19001)", z))
+            db.table("locations").update(shape).eq("zip", z).execute()
+            print(f"  shape {z}: {[b['count'] for b in shape['age_bands']]}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"  FAILED shape {z}: {exc}")
+    generate_vibes(db)
+
+
 def print_summary(db):
     rows = db.table("scores").select("*").order("business_type").order("total_score", desc=True).execute().data
     names = {r["zip"]: r["name"] for r in db.table("locations").select("zip,name").execute().data}
@@ -401,6 +486,7 @@ def run_all():
     if failures:
         print("Failed:", failures)
     generate_insights(db)
+    generate_vibes(db)
     print_summary(db)
 
 
@@ -484,12 +570,16 @@ def main():
     sub.add_parser("summary")
     sub.add_parser("schema")
     sub.add_parser("rescore")
+    sub.add_parser("enrich")
     args = parser.parse_args()
 
     if args.cmd == "check":
         check()
     elif args.cmd == "insights":
         generate_insights()
+        generate_vibes()
+    elif args.cmd == "enrich":
+        enrich()
     elif args.cmd == "rescore":
         rescore()
     elif args.cmd == "schema":

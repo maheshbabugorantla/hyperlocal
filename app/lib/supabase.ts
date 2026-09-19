@@ -109,7 +109,7 @@ export async function fetchResults(type: BusinessType): Promise<ZipResult[]> {
         income_brackets: bands(l.income_brackets),
         male_population: l.male_population ?? null,
         female_population: l.female_population ?? null,
-        vibe: insightByZip.get(s.zip)?.vibe ?? null,
+        vibe: (l.vibe as string | null) ?? insightByZip.get(s.zip)?.vibe ?? null,
       };
     })
     .sort((a, b) => b.total_score - a.total_score);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { DEMAND_MEANS, fetchCompetitors, type Band, type BusinessType, type Competitor, type ZipResult } from "../lib/supabase";
 
 const pct = (v: number) => `${Math.round(v * 100)}%`;
@@ -92,7 +92,9 @@ export default function ZipDetail({
   ageAvg,
   incomeAvg,
   id,
+  insight,
 }: {
+  insight?: ReactNode;
   r: ZipResult;
   type: BusinessType;
   typeLabel: string;
@@ -127,6 +129,7 @@ export default function ZipDetail({
 
   return (
     <div id={id} className="border-t border-line bg-bg px-5 pb-5 lg:pl-[3.4rem]" role="region" aria-label={`${r.name} detail`}>
+      {insight && <div className="pt-3.5">{insight}</div>}
       {/* Why this score */}
       <p className="tnum pt-3.5 text-[12.5px] leading-relaxed text-ink-2">
         <span className="font-semibold text-ink">Why {r.total_score.toFixed(1)}:</span> 0.4 × {r.demand_score.toFixed(0)}{" "}

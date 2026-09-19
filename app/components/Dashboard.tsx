@@ -200,10 +200,12 @@ export default function Dashboard() {
       itemRefs.current.get(zip)?.scrollIntoView({ block: "start", behavior: smooth ? "smooth" : "auto" });
     });
   };
-  const detail = (r: ZipResult) =>
+  // Compact rows don't show the written analysis inline, so their panel leads with it.
+  const detail = (r: ZipResult, withInsight = false) =>
     expandedZip === r.zip && (
       <ZipDetail
         id={`detail-${r.zip}`}
+        insight={withInsight && r.insight ? <Insight text={r.insight} /> : null}
         r={r}
         type={type}
         typeLabel={typeLabel}
@@ -424,7 +426,7 @@ export default function Dashboard() {
                             <span className="tnum text-right font-medium text-ink-2">{r.total_score.toFixed(1)}</span>
                             <Chevron open={expandedZip === r.zip} />
                           </button>
-                          {detail(r)}
+                          {detail(r, true)}
                         </li>
                       );
                     })}

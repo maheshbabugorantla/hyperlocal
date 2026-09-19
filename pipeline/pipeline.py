@@ -37,7 +37,7 @@ ZIPS = [
     "78701", "78702", "78703", "78704", "78705", "78721", "78722", "78723", "78731",
     "78741", "78745", "78748", "78751", "78752", "78756", "78757", "78758",
 ]
-BUSINESS_TYPES = ["coffee shop", "food truck", "boutique retail"]
+BUSINESS_TYPES = ["coffee shop", "food truck", "boutique retail", "med spa", "tattoo shop", "laundromat"]
 
 # Display labels only: ZCTAs have no official names.
 ZIP_NAMES = {
@@ -64,6 +64,28 @@ ZIP_NAMES = {
 W_DEMAND = 0.4
 W_COMPETITION = 0.3
 W_TRAFFIC = 0.3
+
+# Who each business type sells to. Types not listed use the original demand signal
+# (population 20-44 + share of households earning $75k+). Labels match AGE_BANDS /
+# INCOME_BRACKETS; income None means demand is population-only.
+DEMAND_PROFILES = {
+    "med spa": {
+        "ages": ["35–44", "45–64"],
+        "incomes": ["$100–150k", "$150–200k", "$200k+"],
+        "describe": "adults 35-64 and households earning $100k+",
+    },
+    "tattoo shop": {
+        "ages": ["18–24", "25–34"],
+        "incomes": None,
+        "describe": "adults 18-34, any income",
+    },
+    "laundromat": {
+        "ages": ["18–24", "25–34"],
+        "incomes": ["<$25k", "$25–50k"],
+        "describe": "adults 18-34 and households earning under $50k",
+    },
+}
+DEFAULT_DEMAND_DESCRIPTION = "adults 20-44 and households earning $75k+"
 
 # Fixed reference scales so every row scores 0-100 on its own.
 DEMAND_POP_20_44_CAP = 20000     # 20-44 population at which demand's population half maxes out
@@ -300,11 +322,26 @@ def scrape_competitors(zip_code, business_type):
 # Scoring
 # ---------------------------------------------------------------------------
 
-def compute_scores(loc, competitors):
-    demand = 100 * (
-        0.5 * min(loc["pop_20_44"] / DEMAND_POP_20_44_CAP, 1)
-        + 0.5 * float(loc["pct_hh_income_75k_plus"])
-    )
+def demand_score(loc, business_type):
+    profile = DEMAND_PROFILES.get(business_type)
+    if profile is None:
+        return 100 * (
+            0.5 * min(loc["pop_20_44"] / DEMAND_POP_20_44_CAP, 1)
+            + 0.5 * float(loc["pct_hh_income_75k_plus"])
+        )
+    ages = {b["label"]: b["count"] for b in loc["age_bands"]}
+    target_pop = sum(ages[label] for label in profile["ages"])
+    pop_part = min(target_pop / DEMAND_POP_20_44_CAP, 1)
+    if profile["incomes"] is None:
+        return 100 * pop_part
+    incomes = {b["label"]: b["count"] for b in loc["income_brackets"]}
+    households = sum(incomes.values())
+    income_share = sum(incomes[label] for label in profile["incomes"]) / households if households else 0
+    return 100 * (0.5 * pop_part + 0.5 * income_share)
+
+
+def compute_scores(loc, competitors, business_type):
+    demand = demand_score(loc, business_type)
     competition = 100 * (1 - min(len(competitors) / COMPETITION_SATURATION, 1))
     total_reviews = sum(c["review_count"] for c in competitors)
     traffic = 100 * min(math.log10(1 + total_reviews) / math.log10(1 + TRAFFIC_REVIEWS_CAP), 1)
@@ -335,7 +372,7 @@ def process(zip_code, business_type, db=None):
     db = db or supabase()
     loc = ensure_location(db, zip_code)
     competitors = scrape_competitors(zip_code, business_type)
-    scores = compute_scores(loc, competitors)
+    scores = compute_scores(loc, competitors, business_type)
 
     db.table("competitors").delete().eq("zip", zip_code).eq("search_type", business_type).execute()
     if competitors:
@@ -357,9 +394,12 @@ Zip {loc['zip']} ({loc['name']}) ranked in the top {TOP_N_INSIGHTS} of 17 centra
 Scores (0-100): total {score['total_score']}, demand {score['demand_score']},
 competition {score['competition_score']} (higher = fewer competitors), foot traffic proxy {score['traffic_score']}.
 Weights: demand {W_DEMAND}, competition {W_COMPETITION}, traffic {W_TRAFFIC}.
+Demand for a {business_type} is measured as: {DEMAND_PROFILES.get(business_type, {}).get("describe", DEFAULT_DEMAND_DESCRIPTION)}.
 
 Demographics (Census ACS 5-year): population {loc['population']}, ages 20-44 {loc['pop_20_44']},
 median household income ${loc['median_income']}, {float(loc['pct_hh_income_75k_plus']):.0%} of households earn $75k+.
+Age bands (people): {', '.join(f"{b['label']} {b['count']}" for b in loc.get('age_bands') or [])}.
+Household income brackets (households): {', '.join(f"{b['label']} {b['count']}" for b in loc.get('income_brackets') or [])}.
 
 Existing {business_type} competitors located in this zip ({len(competitors)} total):
 {comp_lines}
@@ -378,7 +418,8 @@ def rescore(db=None):
             db.table("competitors").select("review_count").eq("zip", row["zip"])
             .eq("search_type", row["business_type"]).execute().data
         )
-        db.table("scores").update(compute_scores(locs[row["zip"]], competitors)).eq("id", row["id"]).execute()
+        scores = compute_scores(locs[row["zip"]], competitors, row["business_type"])
+        db.table("scores").update(scores).eq("id", row["id"]).execute()
     print_summary(db)
 
 
@@ -464,7 +505,7 @@ def print_summary(db):
         print(f"{r['business_type']:<16} {r['zip']:<6} {names.get(r['zip'], ''):<30} {r['total_score']:>6}")
 
 
-def run_all():
+def run_all(types=None):
     db = supabase()
     # Demographics once per zip, sequentially, before the parallel scrapes.
     for z in ZIPS:
@@ -472,7 +513,7 @@ def run_all():
             ensure_location(db, z)
         except Exception as exc:  # noqa: BLE001
             print(f"  FAILED location {z}: {exc}")
-    combos = [(z, t) for t in BUSINESS_TYPES for z in ZIPS]
+    combos = [(z, t) for t in (types or BUSINESS_TYPES) for z in ZIPS]
     failures = []
     with ThreadPoolExecutor(max_workers=PARALLEL_COMBOS) as pool:
         futures = {pool.submit(process, z, t): (z, t) for z, t in combos}
@@ -566,6 +607,7 @@ def main():
     run.add_argument("--zip")
     run.add_argument("--type", choices=BUSINESS_TYPES)
     run.add_argument("--all", action="store_true")
+    run.add_argument("--types", nargs="+", choices=BUSINESS_TYPES, help="with --all: only these types")
     sub.add_parser("insights")
     sub.add_parser("summary")
     sub.add_parser("schema")
@@ -587,7 +629,7 @@ def main():
     elif args.cmd == "summary":
         print_summary(supabase())
     elif args.all:
-        run_all()
+        run_all(args.types)
     elif args.zip and args.type:
         process(args.zip, args.type)
     else:

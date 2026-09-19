@@ -7,7 +7,7 @@ Usage:
   python pipeline.py insights                            # regenerate insights only
   python pipeline.py enrich                              # age/income shape + vibes (no scraping)
   python pipeline.py rescore                             # recompute scores from stored data
-  python pipeline.py schema                              # create tables (needs SUPABASE_DB_PASSWORD)
+  python pipeline.py schema                              # create tables (needs SUPABASE_DB_URL)
 """
 
 import argparse
@@ -607,11 +607,7 @@ def check():
 def apply_schema():
     """Run schema.sql directly against Postgres (the REST API can't do DDL)."""
     import psycopg
-    conninfo = os.environ.get("SUPABASE_DB_URL") or (
-        f"host={os.environ.get('SUPABASE_DB_HOST', 'aws-0-us-west-2.pooler.supabase.com')} port=5432 "
-        f"dbname=postgres user={os.environ.get('SUPABASE_DB_USER', 'postgres.cnobulfdlrvnmsfizvkd')} "
-        f"password={env('SUPABASE_DB_PASSWORD')} sslmode=require"
-    )
+    conninfo = env("SUPABASE_DB_URL")  # Supabase -> Connect -> Connection string (URI)
     with psycopg.connect(conninfo, autocommit=True) as conn:
         existing = conn.execute(
             "select table_name from information_schema.tables where table_schema = 'public'"

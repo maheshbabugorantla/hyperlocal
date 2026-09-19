@@ -97,4 +97,5 @@ All data is real. None of it is synthetic or mocked.
 - A zip with no same-type competitors gets a foot-traffic score of 0, because the proxy is built from those competitors' reviews (e.g. 78722 for boutique retail). A demand-side traffic source would fix this.
 - Competition counts come from the top 60 Google Maps results per search, so very dense zips may be undercounted.
 - The weights are the same for every business type. Tuning them per type is the obvious next step (for example, food trucks care less about rent-driven income signals).
-- Next data source: Austin Open Data permits (food establishment and mobile vendor permits) for a second, authoritative competition count.
+- Next data source: Overture Maps Places (free, categorized) as a second competition count, with Apify kept only for review counts. Austin's "Mobile Food Vendors" open dataset is 2020 zone polygons, not a vendor list, so it can't serve as a competitor source; the Food Establishment Inspection dataset can, but it only has names, no categories.
+- Expanding beyond 17 zips (metro-wide zip selection, naming, cost, scoring changes): see [`docs/research/zip-expansion.md`](docs/research/zip-expansion.md).

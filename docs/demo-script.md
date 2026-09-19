@@ -35,7 +35,7 @@ Show: the README architecture diagram or the GitHub repo for 5 seconds.
 
 ## 5. What's next (2:35–3:00)
 > "Next: the whole Austin metro rather than 17 zips, per-business weights (food trucks care about
-> different things than boutiques), and city permit data as a second source of truth on competition.
+> different things than boutiques), and Overture Maps as a free second source for competitor counts.
 > The pipeline takes any zip list, so a new city is a config change plus about $0.30 of scraping per
 > zip and type."
 

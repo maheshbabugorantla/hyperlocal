@@ -9,8 +9,8 @@ export default function Home() {
             <span className="text-brand">Hyperlocal:</span> best Austin zip codes, by business type
           </h1>
           <p className="mt-0.5 text-[13.5px] text-ink-2">
-            17 central Austin zips, scored on who lives there, how many competitors are already open, and
-            how busy the streets are.
+            17 central Austin zips, scored for six kinds of small business on who lives there, how many
+            competitors are already open, and how busy the streets are.
           </p>
         </div>
         <p className="tnum hidden text-[12px] text-ink-3 md:block">Census ACS 2020–24 · Google Maps</p>

@@ -17,6 +17,10 @@
   --brand-tint: oklch(0.955 0.022 200);
   --brand-wash: oklch(0.975 0.012 200);
   --danger: oklch(0.5 0.17 28);
+  /* The one warm note: icon details only (steam heart, bow, sparkle, lights, sock). */
+  --icon-accent: oklch(0.72 0.15 50);
+  /* Surface behind an icon, for shapes that must mask what's under them. */
+  --icon-bg: var(--panel);
 
   --z-map-overlay: 500;
   --z-map-controls: 800;
@@ -70,6 +74,47 @@ body {
   white-space: nowrap;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
+}
+
+/* ---------- Business-type icons ---------- */
+.type-tab {
+  --icon-bg: var(--panel);
+}
+.type-tab:hover {
+  --icon-bg: var(--bg);
+}
+.type-tab[aria-selected="true"] {
+  --icon-bg: var(--brand-deep);
+}
+.type-icon .ti-steam,
+.type-icon .ti-bubbles,
+.type-icon .ti-sparkle,
+.type-icon .ti-lights {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+@keyframes ti-rise {
+  0% { transform: translateY(0); opacity: 1; }
+  50% { transform: translateY(-1.2px); opacity: 0.55; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+@keyframes ti-twinkle {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(0.7); }
+}
+@keyframes ti-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+.type-tab:hover .ti-steam,
+.type-tab:hover .ti-bubbles {
+  animation: ti-rise 1.2s var(--ease-out-quart) infinite;
+}
+.type-tab:hover .ti-sparkle {
+  animation: ti-twinkle 1s ease-in-out infinite;
+}
+.type-tab:hover .ti-lights {
+  animation: ti-blink 0.9s steps(2, jump-none) infinite;
 }
 
 /* ---------- Loading shimmer ---------- */
@@ -140,6 +185,29 @@ body {
   right: 6px;
 }
 
+/* Neighborhood labels (non-interactive divIcons in their own pane) */
+.zip-label {
+  pointer-events: none !important;
+}
+.zip-label span {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, -50%);
+  white-space: nowrap;
+  font: 600 10.5px/1 var(--font-sans);
+  letter-spacing: 0.01em;
+  color: var(--brand-deep);
+  text-shadow:
+    0 0 2px oklch(1 0 0),
+    0 0 3px oklch(1 0 0),
+    0 0 6px oklch(1 0 0 / 0.9);
+}
+
+.zip-label.is-under span {
+  color: var(--ink);
+}
+
 /* Zip markers (divIcons) */
 .zip-marker {
   background: none;
@@ -178,6 +246,12 @@ body {
   }
   .zip-dot {
     transition: none;
+  }
+  .type-tab:hover .ti-steam,
+  .type-tab:hover .ti-bubbles,
+  .type-tab:hover .ti-sparkle,
+  .type-tab:hover .ti-lights {
+    animation: none;
   }
   * {
     scroll-behavior: auto !important;

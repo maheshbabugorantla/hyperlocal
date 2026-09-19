@@ -2,34 +2,140 @@
 
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
-import { useEffect, useMemo, useRef } from "react";
-import { MapContainer, Marker, Popup, TileLayer, Tooltip, ZoomControl, useMap } from "react-leaflet";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { MapContainer, Marker, Pane, Polygon, Popup, TileLayer, Tooltip, ZoomControl, useMap } from "react-leaflet";
 import {
   FACTORS,
   factorRanks,
-  markerSize,
   scoreColor,
   scoreRange,
   type ZipResult,
 } from "../lib/supabase";
 
-export type SelectSource = "map" | "list";
+/** "map" = marker click, "area" = zip outline click, "list" = sidebar click. */
+export type SelectSource = "map" | "area" | "list";
+
+type ZipArea = {
+  zip: string;
+  name: string;
+  label: [number, number];
+  rings: [number, number][][][]; // polygons -> rings -> [lat, lng]
+};
+
+type GeoFeature = {
+  properties: { zip: string; name: string; label_lat: number; label_lng: number };
+  geometry: { type: "Polygon" | "MultiPolygon"; coordinates: number[][][] | number[][][][] };
+};
+
+function toAreas(fc: { features: GeoFeature[] }): ZipArea[] {
+  return fc.features.map((f) => {
+    const polys = (f.geometry.type === "Polygon" ? [f.geometry.coordinates] : f.geometry.coordinates) as number[][][][];
+    return {
+      zip: f.properties.zip,
+      name: f.properties.name,
+      label: [f.properties.label_lat, f.properties.label_lng],
+      rings: polys.map((poly) => poly.map((ring) => ring.map(([lng, lat]) => [lat, lng] as [number, number]))),
+    };
+  });
+}
+
+/** Load zip outlines at runtime (kept out of the JS bundle). */
+function useZipAreas() {
+  const [areas, setAreas] = useState<ZipArea[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/austin-zips.geojson")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((fc) => !cancelled && setAreas(toAreas(fc)))
+      .catch(() => !cancelled && setAreas([])); // markers still work without outlines
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return areas;
+}
+
+/**
+ * Neighborhood names, always visible. Short names ("South Congress" rather than
+ * "South Congress / Bouldin") until zoomed in; lower-ranked labels that would
+ * collide with a higher-ranked one are hidden.
+ */
+const LANDMARKS = new Set(["78701", "78702"]); // Downtown, East Austin
+
+function AreaLabels({ areas, rankOf, topN }: { areas: ZipArea[]; rankOf: Map<string, number>; topN: number }) {
+  const map = useMap();
+  const [view, setView] = useState(0);
+  useEffect(() => {
+    const bump = () => setView((v) => v + 1);
+    map.on("zoomend moveend resize", bump);
+    return () => {
+      map.off("zoomend moveend resize", bump);
+    };
+  }, [map]);
+
+  const zoom = map.getZoom();
+  const placed = useMemo(() => {
+    void view;
+    const full = zoom >= 13;
+    // Landmarks everyone knows anchor the map first, then the ranking decides.
+    const prio = (z: string) => (z === "78701" ? -1 : LANDMARKS.has(z) ? 0 : (rankOf.get(z) ?? 99));
+    const order = [...areas].sort((a, b) => prio(a.zip) - prio(b.zip));
+    const boxes: { x0: number; y0: number; x1: number; y1: number }[] = [];
+    const out: { area: ZipArea; text: string; dy: number }[] = [];
+    for (const a of order) {
+      const text = full ? a.name : a.name.split(" / ")[0];
+      // top-5 zips carry a numbered marker on the label point; their name sits just under it
+      const under = (rankOf.get(a.zip) ?? 99) <= topN;
+      const p = map.latLngToContainerPoint(a.label);
+      const w = text.length * 6.1 + 6;
+      if (under) boxes.push({ x0: p.x - 15, y0: p.y - 15, x1: p.x + 15, y1: p.y + 15 });
+      const boxAt = (d: number) => ({ x0: p.x - w / 2, y0: p.y + d - 8, x1: p.x + w / 2, y1: p.y + d + 8 });
+      const hits = (b: ReturnType<typeof boxAt>) =>
+        boxes.some((o) => b.x0 < o.x1 && b.x1 > o.x0 && b.y0 < o.y1 && b.y1 > o.y0);
+      // try the label point first, then nudge down/up a line before giving up
+      const dy = (under ? [23] : [0, 13, -13]).find((d) => !hits(boxAt(d)));
+      if (dy === undefined) continue;
+      boxes.push(boxAt(dy));
+      out.push({ area: a, text, dy });
+    }
+    return out;
+  }, [areas, rankOf, topN, map, zoom, view]);
+
+  return (
+    <>
+      {placed.map(({ area, text, dy }) => (
+        <Marker
+          key={`${area.zip}:${text}:${dy}`}
+          pane="zip-labels"
+          position={area.label}
+          interactive={false}
+          keyboard={false}
+          icon={L.divIcon({
+            className: dy === 23 ? "zip-label is-under" : "zip-label",
+            iconSize: [0, 0],
+            html: `<span style="transform:translate(-50%, calc(-50% + ${dy}px))">${text.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</span>`,
+          })}
+        />
+      ))}
+    </>
+  );
+}
 
 const reducedMotion = () =>
   typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /** Zoom to the markers once they first arrive; keep the user's view after that. */
-function FitToResults({ results }: { results: ZipResult[] }) {
+function FitToResults({ results, areas }: { results: ZipResult[]; areas: ZipArea[] | null }) {
   const map = useMap();
-  const hasResults = results.length > 0;
+  const ready = results.length > 0 && areas !== null;
   useEffect(() => {
-    if (!hasResults) return;
-    map.fitBounds(
-      results.map((r) => [r.lat, r.lng] as [number, number]),
-      { padding: [48, 48], maxZoom: 13 },
-    );
+    if (!ready) return;
+    const pts: [number, number][] = areas!.length
+      ? areas!.flatMap((a) => a.rings.flatMap((poly) => poly[0]))
+      : results.map((r) => [r.lat, r.lng]);
+    map.fitBounds(pts, { padding: [16, 16], maxZoom: 13 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [map, hasResults]);
+  }, [map, ready]);
   return null;
 }
 
@@ -51,10 +157,10 @@ function FlyToSelection({
       map.closePopup();
       return;
     }
-    if (source !== "list") return;
+    if (source === "map") return;
     const r = results.find((x) => x.zip === selectedZip);
     if (!r) return;
-    const target: [number, number] = [r.lat, r.lng];
+    const target = markers.current.get(selectedZip)?.getLatLng() ?? L.latLng(r.lat, r.lng);
     const zoom = Math.max(map.getZoom(), 12);
     const open = () => markers.current.get(selectedZip)?.openPopup();
     if (reducedMotion()) {
@@ -75,6 +181,7 @@ function FlyToSelection({
 
 function ZipMarker({
   r,
+  at,
   rank,
   total,
   isTop,
@@ -88,6 +195,7 @@ function ZipMarker({
   registerRef,
 }: {
   r: ZipResult;
+  at: [number, number] | undefined;
   rank: number;
   total: number;
   isTop: boolean;
@@ -100,7 +208,7 @@ function ZipMarker({
   onClose: (zip: string) => void;
   registerRef: (zip: string, m: L.Marker | null) => void;
 }) {
-  const size = markerSize(t);
+  const size = isTop ? 28 : 0;
   const color = scoreColor(t);
   const icon = useMemo(
     () =>
@@ -108,11 +216,10 @@ function ZipMarker({
         className: "zip-marker",
         iconSize: [size, size],
         iconAnchor: [size / 2, size / 2],
-        popupAnchor: [0, -size / 2 - 2],
+        popupAnchor: [0, isTop ? -size / 2 - 2 : 0],
         tooltipAnchor: [0, -size / 2],
-        html: `<span class="zip-dot ${isTop ? "is-top" : "is-rest"}" style="background:${color}">${
-          isTop ? rank : ""
-        }</span>`,
+        // Only the top 5 get a visible marker; the area fill carries everyone else's score.
+        html: isTop ? `<span class="zip-dot is-top" style="background:${color}">${rank}</span>` : "",
       }),
     [size, color, isTop, rank],
   );
@@ -131,11 +238,13 @@ function ZipMarker({
         markerRef.current = m;
         registerRef(r.zip, m);
       }}
-      position={[r.lat, r.lng]}
+      position={at ?? [r.lat, r.lng]}
       icon={icon}
       title={`#${rank} ${r.name} (${r.zip}), score ${r.total_score.toFixed(1)}`}
       alt={`${r.name} ${r.zip}`}
       zIndexOffset={hot ? 1000 : isTop ? 500 - rank : 0}
+      interactive={isTop}
+      keyboard={isTop}
       eventHandlers={{
         click: () => onSelect(r.zip),
         mouseover: () => onHover(r.zip),
@@ -143,7 +252,7 @@ function ZipMarker({
         popupclose: () => onClose(r.zip),
       }}
     >
-      {!selected && (
+      {!selected && isTop && (
       <Tooltip direction="top" opacity={1} className="!rounded-md !border-line-strong !px-2 !py-1 !text-xs !shadow-sm">
         <span className="font-semibold">{r.name}</span>
         <span className="tnum ml-1.5 text-ink-2">{r.total_score.toFixed(1)}</span>
@@ -205,6 +314,10 @@ export default function ZipMap({
   const { t } = scoreRange(results);
   const ranks = useMemo(() => factorRanks(results), [results]);
   const markers = useRef(new Map<string, L.Marker>());
+  const areas = useZipAreas();
+  const byZip = useMemo(() => new Map(results.map((r, i) => [r.zip, { r, rank: i + 1 }])), [results]);
+  const rankOf = useMemo(() => new Map(results.map((r, i) => [r.zip, i + 1])), [results]);
+  const labelAt = useMemo(() => new Map((areas ?? []).map((a) => [a.zip, a.label])), [areas]);
   const selectedRef = useRef(selectedZip);
   useEffect(() => {
     selectedRef.current = selectedZip;
@@ -215,6 +328,8 @@ export default function ZipMap({
       center={[30.31, -97.735]}
       zoom={12}
       scrollWheelZoom
+      zoomSnap={0.25}
+      zoomDelta={0.5}
       zoomControl={false}
       className="absolute! inset-0"
     >
@@ -224,13 +339,40 @@ export default function ZipMap({
         maxZoom={16}
       />
       <ZoomControl position="bottomright" />
-      <FitToResults results={results} />
+      <FitToResults results={results} areas={areas} />
+      <Pane name="zip-labels" style={{ zIndex: 450, pointerEvents: "none" }} />
+      {areas?.map((a) => {
+        const hit = byZip.get(a.zip);
+        if (!hit) return null;
+        const isSel = a.zip === selectedZip;
+        const isHover = a.zip === hoverZip;
+        return (
+          <Polygon
+            key={a.zip}
+            positions={a.rings}
+            pathOptions={{
+              fillColor: scoreColor(t(hit.r.total_score)),
+              fillOpacity: isSel || isHover ? 0.62 : 0.42,
+              color: isSel ? "oklch(0.21 0.018 220)" : isHover ? "oklch(0.34 0.062 204)" : "oklch(1 0 0)",
+              weight: isSel ? 2.5 : isHover ? 2 : 1.2,
+              opacity: 1,
+            }}
+            eventHandlers={{
+              click: () => onSelect(a.zip, "area"),
+              mouseover: () => onHover(a.zip),
+              mouseout: () => onHover(null),
+            }}
+          />
+        );
+      })}
+      {areas && areas.length > 0 && <AreaLabels areas={areas} rankOf={rankOf} topN={topN} />}
       <FlyToSelection results={results} selectedZip={selectedZip} source={selectSource} markers={markers} />
       {results.map((r, i) => (
         <ZipMarker
           // Leaflet doesn't update a marker's title after creation; remount when the rank changes
           key={`${r.zip}:${i}`}
           r={r}
+          at={labelAt.get(r.zip)}
           rank={i + 1}
           total={results.length}
           isTop={i < topN}

@@ -4,10 +4,10 @@ import dynamic from "next/dynamic";
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   BUSINESS_TYPES,
+  DEMAND_MEANS,
   FACTORS,
   factorRanks,
   fetchResults,
-  markerSize,
   scoreColor,
   scoreRange,
   type BusinessType,
@@ -15,6 +15,8 @@ import {
   type ZipResult,
 } from "../lib/supabase";
 import type { SelectSource } from "./ZipMap";
+import ZipDetail, { fieldAverages } from "./ZipDetail";
+import { TypeIcon } from "./TypeIcons";
 
 const ZipMap = dynamic(() => import("./ZipMap"), {
   ssr: false,
@@ -24,9 +26,12 @@ const ZipMap = dynamic(() => import("./ZipMap"), {
 const TOP_N = 5;
 
 const NOUN: Record<BusinessType, string> = {
-  "coffee shop": "coffee shop",
-  "food truck": "food truck or pop-up",
-  "boutique retail": "boutique",
+  "coffee shop": "a coffee shop",
+  "food truck": "a food truck or pop-up",
+  "boutique retail": "a boutique",
+  "med spa": "a med spa",
+  "tattoo shop": "a tattoo studio",
+  laundromat: "a laundromat",
 };
 
 function MapSkeleton({ label }: { label: string }) {
@@ -77,7 +82,9 @@ function FactorBars({
   r,
   ranks,
   total,
+  demandMeans,
 }: {
+  demandMeans: string;
   r: ZipResult;
   ranks: Record<FactorKey, number> | undefined;
   total: number;
@@ -90,7 +97,10 @@ function FactorBars({
         const isStandout = f.key === standout;
         return (
           <div key={f.key} className="min-w-0">
-            <dt className={`truncate text-[11.5px] leading-tight ${isStandout ? "font-semibold text-ink" : "text-ink-2"}`}>
+            <dt
+              title={f.key === "demand_score" ? `Demand = ${demandMeans}` : undefined}
+              className={`truncate text-[11.5px] leading-tight ${isStandout ? "font-semibold text-ink" : "text-ink-2"}`}
+            >
               {f.label}
             </dt>
             <dd className="mt-1">
@@ -147,10 +157,14 @@ export default function Dashboard() {
   const top = results.slice(0, TOP_N);
   const rest = results.slice(TOP_N);
   const selectedZip = selected?.zip ?? null;
+  const [expandedZip, setExpandedZip] = useState<string | null>(null);
+  const ageAvg = useMemo(() => fieldAverages(results, "age_bands"), [results]);
+  const incomeAvg = useMemo(() => fieldAverages(results, "income_brackets"), [results]);
+  const typeLabel = BUSINESS_TYPES.find((b) => b.value === type)!.label;
 
   // A marker click brings its list entry into view.
   useEffect(() => {
-    if (!selected || selected.source !== "map") return;
+    if (!selected || selected.source === "list") return;
     const el = itemRefs.current.get(selected.zip);
     if (!el) return;
     const smooth = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -161,10 +175,36 @@ export default function Dashboard() {
     if (next === type) return;
     setType(next);
     setSelected(null);
+    setExpandedZip(null);
     setHoverZip(null);
   };
 
   const pickFromList = (zip: string) => setSelected({ zip, source: "list" });
+
+  // Clicking an entry opens its detail (one at a time) and flies the map there.
+  const toggle = (zip: string) => {
+    if (expandedZip === zip) {
+      setExpandedZip(null);
+      return;
+    }
+    setExpandedZip(zip);
+    pickFromList(zip);
+    requestAnimationFrame(() => {
+      const smooth = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      itemRefs.current.get(zip)?.scrollIntoView({ block: "start", behavior: smooth ? "smooth" : "auto" });
+    });
+  };
+  const detail = (r: ZipResult) =>
+    expandedZip === r.zip && (
+      <ZipDetail
+        id={`detail-${r.zip}`}
+        r={r}
+        type={type}
+        typeLabel={typeLabel}
+        ageAvg={ageAvg}
+        incomeAvg={incomeAvg}
+      />
+    );
   const setItemRef = (zip: string) => (el: HTMLElement | null) => {
     if (el) itemRefs.current.set(zip, el);
     else itemRefs.current.delete(zip);
@@ -196,7 +236,15 @@ export default function Dashboard() {
         {loading && data && (
           <div className="pointer-events-none absolute inset-0 z-[var(--z-map-loading)] flex items-start justify-center bg-bg/45 pt-5">
             <span className="rounded-md border border-line-strong bg-bg px-3 py-1.5 text-xs font-medium text-ink shadow-sm">
-              Scoring zips for a {NOUN[type]}…
+              Scoring zips for {NOUN[type]}…
+            </span>
+          </div>
+        )}
+
+        {!loading && !error && data && results.length === 0 && (
+          <div className="pointer-events-none absolute inset-0 z-[var(--z-map-loading)] flex items-start justify-center pt-5">
+            <span className="rounded-md border border-line-strong bg-bg px-3 py-1.5 text-xs font-medium text-ink shadow-sm">
+              Scores for {typeLabel} are still being computed
             </span>
           </div>
         )}
@@ -210,15 +258,23 @@ export default function Dashboard() {
       <aside className="flex w-full flex-col bg-panel lg:w-[500px] lg:shrink-0 lg:border-l lg:border-line">
         <TypeSelector id="type-desktop" className="hidden lg:block" type={type} onChange={changeType} />
 
-        <div className="flex-1 lg:min-h-0 lg:overflow-y-auto">
+        <div className="relative flex-1 lg:min-h-0 lg:overflow-y-auto">
           <div className="px-5 pt-5 pb-3">
-            <h2 className="text-[17px] font-bold tracking-[-0.01em] text-balance text-ink">
-              Five best zips for a {NOUN[type]}
+            <h2 className="flex items-center gap-2 text-[17px] font-bold tracking-[-0.01em] text-balance text-ink">
+              <TypeIcon type={type} className="h-6 w-6 shrink-0 text-brand-deep" />
+              <span>Five best zips for {NOUN[type]}</span>
             </h2>
             <p className="tnum mt-1 text-[13px] text-ink-2">
-              {loading || !results.length
+              {loading
                 ? "Ranking 17 central Austin zips…"
-                : `Ranked out of ${results.length}. Scores run ${min.toFixed(0)} to ${max.toFixed(0)}; the analysis below cites the numbers behind each pick.`}
+                : !results.length
+                  ? "No zips scored yet for this type."
+                : results.length < 17
+                  ? `${results.length} of 17 zips scored so far; the rest are still being computed.`
+                  : `Ranked out of ${results.length}. Scores run ${min.toFixed(0)} to ${max.toFixed(0)}; the analysis below cites the numbers behind each pick.`}
+            </p>
+            <p className="mt-1.5 text-[12.5px] text-ink-2">
+              <span className="font-semibold text-ink">Demand here =</span> {DEMAND_MEANS[type]}
             </p>
           </div>
 
@@ -242,8 +298,12 @@ export default function Dashboard() {
           )}
 
           {!loading && !error && results.length === 0 && (
-            <p className="px-5 pb-6 text-sm text-ink-2">
-              No scores yet for this business type. Run the pipeline for it, then reload.
+            <p className="flex items-start gap-3 px-5 pb-6 text-sm text-ink-2">
+              <TypeIcon type={type} className="h-8 w-8 shrink-0 text-brand" />
+              <span>
+              Scores for {typeLabel} are still being computed. They appear here automatically once the
+              pipeline finishes; switch back to this tab in a few minutes.
+              </span>
             </p>
           )}
 
@@ -257,12 +317,13 @@ export default function Dashboard() {
                     <li key={r.zip} ref={setItemRef(r.zip)} className="scroll-my-3">
                       <button
                         type="button"
-                        onClick={() => pickFromList(r.zip)}
+                        onClick={() => toggle(r.zip)}
                         onMouseEnter={() => setHoverZip(r.zip)}
                         onMouseLeave={() => setHoverZip(null)}
                         onFocus={() => setHoverZip(r.zip)}
                         onBlur={() => setHoverZip(null)}
-                        aria-pressed={isSel}
+                        aria-expanded={expandedZip === r.zip}
+                        aria-controls={`detail-${r.zip}`}
                         className={`group relative block w-full px-5 pt-4 pb-4 text-left transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-inset ${
                           isSel ? "bg-brand-wash ring-1 ring-brand/40 ring-inset" : isHover ? "bg-brand-wash/60" : "bg-bg"
                         }`}
@@ -304,11 +365,16 @@ export default function Dashboard() {
                             </span>
 
                             <span className="mt-3 block border-t border-line pt-2.5">
-                              <FactorBars r={r} ranks={ranks.get(r.zip)} total={results.length} />
+                              <FactorBars r={r} ranks={ranks.get(r.zip)} total={results.length} demandMeans={DEMAND_MEANS[type]} />
+                            </span>
+                            <span className="mt-3 flex items-center gap-1.5 text-[12.5px] font-semibold text-brand-deep">
+                              {expandedZip === r.zip ? "Hide detail" : "Residents, income, vibe, competitors"}
+                              <Chevron open={expandedZip === r.zip} />
                             </span>
                           </span>
                         </span>
                       </button>
+                      {detail(r)}
                     </li>
                   );
                 })}
@@ -327,13 +393,14 @@ export default function Dashboard() {
                         <li key={r.zip} ref={setItemRef(r.zip)}>
                           <button
                             type="button"
-                            onClick={() => pickFromList(r.zip)}
+                            onClick={() => toggle(r.zip)}
                             onMouseEnter={() => setHoverZip(r.zip)}
                             onMouseLeave={() => setHoverZip(null)}
                             onFocus={() => setHoverZip(r.zip)}
                             onBlur={() => setHoverZip(null)}
-                            aria-pressed={isSel}
-                            className={`grid w-full grid-cols-[1.75rem_1fr_2.75rem] sm:grid-cols-[1.75rem_1fr_4.5rem_2.75rem] items-center gap-2 py-2 pr-1 text-left text-[13px] transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-brand ${
+                            aria-expanded={expandedZip === r.zip}
+                            aria-controls={`detail-${r.zip}`}
+                            className={`grid w-full grid-cols-[1.75rem_1fr_2.75rem_1rem] sm:grid-cols-[1.75rem_1fr_4.5rem_2.75rem_1rem] items-center gap-2 py-2 pr-1 text-left text-[13px] transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-brand ${
                               isSel ? "bg-brand-tint" : isHover ? "bg-bg" : ""
                             }`}
                           >
@@ -348,7 +415,9 @@ export default function Dashboard() {
                               />
                             </span>
                             <span className="tnum text-right font-medium text-ink-2">{r.total_score.toFixed(1)}</span>
+                            <Chevron open={expandedZip === r.zip} />
                           </button>
+                          {detail(r)}
                         </li>
                       );
                     })}
@@ -368,6 +437,18 @@ export default function Dashboard() {
         </div>
       </aside>
     </div>
+  );
+}
+
+function Chevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      aria-hidden
+      viewBox="0 0 12 12"
+      className={`h-3 w-3 shrink-0 text-brand-deep transition-transform duration-200 ease-out-quart motion-reduce:transition-none ${open ? "rotate-180" : ""}`}
+    >
+      <path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }
 
@@ -392,7 +473,7 @@ function TypeSelector({
       <div
         role="tablist"
         aria-labelledby={id}
-        className="mt-2 grid grid-cols-3 rounded-lg border border-line-strong bg-panel p-[3px]"
+        className="mt-2 grid grid-cols-3 gap-[3px] rounded-lg border border-line-strong bg-panel p-[3px]"
       >
         {BUSINESS_TYPES.map((b) => {
           const active = b.value === type;
@@ -402,11 +483,12 @@ function TypeSelector({
               role="tab"
               aria-selected={active}
               onClick={() => onChange(b.value)}
-              className={`rounded-md px-2 py-2 text-[13px] leading-tight font-semibold transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-brand ${
+              className={`type-tab flex flex-col items-center justify-center gap-1 rounded-md px-1.5 py-2 text-center text-[12.5px] leading-tight font-semibold lg:flex-row lg:gap-1.5 lg:px-1.5 lg:text-left lg:whitespace-nowrap transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-brand ${
                 active ? "bg-brand-deep text-white shadow-sm" : "text-ink-2 hover:bg-bg hover:text-ink"
               }`}
             >
-              {b.label}
+              <TypeIcon type={b.value} className="h-[22px] w-[22px] shrink-0" />
+              <span>{b.label}</span>
             </button>
           );
         })}
@@ -418,27 +500,17 @@ function TypeSelector({
 /* ---------------- Legend ---------------- */
 
 function Legend({ min, max }: { min: number; max: number }) {
-  const sizes = [0, 0.5, 1];
   return (
     <div className="absolute top-3 left-3 z-[var(--z-map-overlay)] w-[228px] rounded-lg border border-line-strong bg-bg/95 px-3.5 py-3 text-[11.5px] leading-snug text-ink-2 shadow-[0_1px_3px_oklch(0.2_0.02_220/0.1)] max-sm:w-[176px] max-sm:px-3 max-sm:py-2.5">
       <div className="text-[12px] font-semibold text-ink">Opportunity score</div>
+      <div className="mt-0.5 max-sm:hidden">Each zip is shaded by its score</div>
       <div
-        className="mt-2 h-2 rounded-full"
+        className="mt-2 h-2.5 rounded-[3px] opacity-80"
         style={{ background: `linear-gradient(to right, ${scoreColor(0)}, ${scoreColor(0.5)}, ${scoreColor(1)})` }}
       />
       <div className="tnum mt-1 flex justify-between">
-        <span>{min.toFixed(0)}</span>
-        <span>{max.toFixed(0)}</span>
-      </div>
-      <div className="mt-2 flex items-center gap-1.5 max-sm:hidden">
-        {sizes.map((v) => (
-          <span
-            key={v}
-            className="inline-block shrink-0 rounded-full border border-white"
-            style={{ width: markerSize(v) * 0.7, height: markerSize(v) * 0.7, background: scoreColor(v) }}
-          />
-        ))}
-        <span className="ml-1">Darker and larger = higher</span>
+        <span>{min.toFixed(0)} weaker</span>
+        <span>stronger {max.toFixed(0)}</span>
       </div>
       <div className="mt-2 flex items-center gap-2 max-sm:hidden">
         <span
@@ -447,7 +519,7 @@ function Legend({ min, max }: { min: number; max: number }) {
         >
           1
         </span>
-        <span>Numbered = top 5, with written analysis</span>
+        <span>Top 5, with written analysis</span>
       </div>
       <p className="mt-2 border-t border-line pt-2 max-sm:hidden">
         40% demand + 30% low competition + 30% foot traffic, each 0–100.

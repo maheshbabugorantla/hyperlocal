@@ -15,7 +15,7 @@ const serif = Source_Serif_4({
 
 export const metadata: Metadata = {
   title: "Hyperlocal",
-  description: "Best Austin zip codes to open a coffee shop, food truck, or boutique",
+  description: "Best Austin zip codes to open a small business: coffee shop, food truck, boutique, med spa, tattoo studio, or laundromat",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

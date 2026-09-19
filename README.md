@@ -2,12 +2,16 @@
 
 **Best Austin zip codes to open a coffee shop, food truck / pop-up, or boutique retail store.**
 
+- Live app: https://hyperlocal-sigma.vercel.app
+- Repo: https://github.com/maheshbabugorantla/hyperlocal
+
 Hyperlocal scores 17 central Austin zip codes for each business type on three factors: local demand (Census demographics), competition (existing businesses from Google Maps), and a foot-traffic proxy (review volume). It shows them on a map with a ranked top 5 and a plain-English AI explanation for each.
 
 ## Quick start
 
 ```bash
-# 0. Supabase: paste pipeline/schema.sql into the SQL Editor and run it once.
+# 0. Supabase: paste pipeline/schema.sql into the SQL Editor and run it once
+#    (or set SUPABASE_DB_URL in .env and run `pipeline.py schema`).
 # 1. Secrets
 cp .env.example .env          # fill in pipeline keys
 cp .env.example .env.local    # fill in NEXT_PUBLIC_* keys
@@ -90,6 +94,7 @@ All data is real. None of it is synthetic or mocked.
 
 - It covers 17 central zips, not all of Austin.
 - Foot traffic is a proxy based on review counts, not real mobility data (e.g. SafeGraph/Placer.ai).
+- A zip with no same-type competitors gets a foot-traffic score of 0, because the proxy is built from those competitors' reviews (e.g. 78722 for boutique retail). A demand-side traffic source would fix this.
 - Competition counts come from the top 60 Google Maps results per search, so very dense zips may be undercounted.
 - The weights are the same for every business type. Tuning them per type is the obvious next step (for example, food trucks care less about rent-driven income signals).
 - Next data source: Austin Open Data permits (food establishment and mobile vendor permits) for a second, authoritative competition count.

@@ -75,12 +75,43 @@ export function scoreRange(results: ZipResult[]) {
   return { min, max, t: (score: number) => (max > min ? (score - min) / (max - min) : 1) };
 }
 
-/** Red (weak) -> amber -> green (strong). */
+/**
+ * Sequential single-hue ramp (mineral teal, hue ~200): pale = weaker, deep = stronger.
+ * Lightness carries the signal so it survives color-vision deficiency.
+ */
 export function scoreColor(t: number) {
-  const hue = Math.round(t * 130);
-  return `hsl(${hue} 75% 42%)`;
+  const c = Math.min(1, Math.max(0, t));
+  const l = 0.78 - c * 0.42;
+  const ch = 0.05 + c * 0.06;
+  const h = 196 + c * 8;
+  return `oklch(${l.toFixed(3)} ${ch.toFixed(3)} ${h.toFixed(1)})`;
 }
 
-export function markerRadius(t: number) {
-  return 8 + t * 14;
+/** Marker diameter in px. */
+export function markerSize(t: number) {
+  return Math.round(14 + t * 22);
+}
+
+export const FACTORS = [
+  { key: "demand_score", label: "Demand", weight: 0.4 },
+  { key: "competition_score", label: "Low competition", weight: 0.3 },
+  { key: "traffic_score", label: "Foot traffic", weight: 0.3 },
+] as const;
+
+export type FactorKey = (typeof FACTORS)[number]["key"];
+
+/** Rank (1 = best) of each zip on each factor within the current result set. */
+export function factorRanks(results: ZipResult[]) {
+  const ranks = new Map<string, Record<FactorKey, number>>();
+  for (const r of results) ranks.set(r.zip, { demand_score: 0, competition_score: 0, traffic_score: 0 });
+  for (const f of FACTORS) {
+    const sorted = [...results].sort((a, b) => b[f.key] - a[f.key]);
+    sorted.forEach((r, i) => {
+      // ties share the better rank
+      const prev = sorted[i - 1];
+      const rank = prev && prev[f.key] === r[f.key] ? ranks.get(prev.zip)![f.key] : i + 1;
+      ranks.get(r.zip)![f.key] = rank;
+    });
+  }
+  return ranks;
 }

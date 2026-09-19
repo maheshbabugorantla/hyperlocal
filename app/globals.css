@@ -1,24 +1,185 @@
 @import "tailwindcss";
 
+/*
+ * Hyperlocal palette. Restrained: white work surface, a cool panel neutral,
+ * and one mineral-teal brand hue that also drives the score ramp on the map.
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg: oklch(1 0 0);
+  --panel: oklch(0.978 0.004 205);
+  --line: oklch(0.91 0.008 205);
+  --line-strong: oklch(0.82 0.012 205);
+  --ink: oklch(0.21 0.018 220);
+  --ink-2: oklch(0.44 0.018 220);
+  --ink-3: oklch(0.55 0.014 220);
+  --brand: oklch(0.45 0.074 200);
+  --brand-deep: oklch(0.34 0.062 204);
+  --brand-tint: oklch(0.955 0.022 200);
+  --brand-wash: oklch(0.975 0.012 200);
+  --danger: oklch(0.5 0.17 28);
+
+  --z-map-overlay: 500;
+  --z-map-controls: 800;
+  --z-map-loading: 900;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-brand: var(--brand);
+  --color-brand-deep: var(--brand-deep);
+  --color-brand-tint: var(--brand-tint);
+  --color-brand-wash: var(--brand-wash);
+  --color-danger: var(--danger);
+  --font-sans: var(--font-public-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-source-serif), Georgia, serif;
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
 }
 
-/* Leaflet markers are SVG paths; drop the browser focus ring on click */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Insight prose ---------- */
+.insight {
+  font-family: var(--font-serif);
+  text-wrap: pretty;
+  hyphens: manual;
+}
+.insight .fig {
+  font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  font-size: 0.92em;
+  color: var(--brand-deep);
+  background: var(--brand-tint);
+  border-radius: 3px;
+  padding: 0.05em 0.14em;
+  margin: 0 0.02em;
+  white-space: nowrap;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+/* ---------- Loading shimmer ---------- */
+@keyframes shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, var(--panel) 25%, oklch(0.94 0.008 205) 50%, var(--panel) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+/* ---------- Leaflet chrome ---------- */
+.leaflet-container {
+  font-family: var(--font-sans);
+  background: oklch(0.95 0.003 205);
+}
 .leaflet-interactive:focus {
   outline: none;
+}
+.leaflet-control-zoom.leaflet-bar {
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  box-shadow: 0 1px 2px oklch(0.2 0.02 220 / 0.08);
+  overflow: hidden;
+}
+.leaflet-control-zoom.leaflet-bar a {
+  color: var(--ink);
+  border-bottom-color: var(--line);
+  width: 32px;
+  height: 32px;
+  line-height: 30px;
+}
+.leaflet-control-zoom.leaflet-bar a:hover {
+  background: var(--brand-wash);
+}
+.leaflet-control-attribution {
+  font-size: 10px;
+  color: var(--ink-3);
+  background: oklch(1 0 0 / 0.8) !important;
+}
+.leaflet-control-attribution a {
+  color: var(--ink-2);
+}
+
+/* Popup: flat panel, hairline border, no bubbly shadow */
+.hl-popup .leaflet-popup-content-wrapper {
+  border-radius: 8px;
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 6px 24px oklch(0.2 0.02 220 / 0.14);
+  padding: 0;
+}
+.hl-popup .leaflet-popup-content {
+  margin: 0;
+  width: 260px !important;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--ink);
+}
+.hl-popup .leaflet-popup-tip {
+  border: 1px solid var(--line-strong);
+  box-shadow: none;
+}
+.hl-popup a.leaflet-popup-close-button {
+  color: var(--ink-3);
+  top: 6px;
+  right: 6px;
+}
+
+/* Zip markers (divIcons) */
+.zip-marker {
+  background: none;
+  border: none;
+}
+.zip-dot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  border: 1.5px solid oklch(1 0 0);
+  box-shadow: 0 1px 3px oklch(0.2 0.02 220 / 0.25);
+  color: oklch(1 0 0);
+  font: 700 12px/1 var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  transition: transform 180ms var(--ease-out-quart), box-shadow 180ms var(--ease-out-quart);
+  cursor: pointer;
+}
+.zip-dot.is-rest {
+  opacity: 0.9;
+}
+.zip-dot.is-top {
+  border-width: 2px;
+  font-size: 13px;
+}
+.zip-dot.is-hot {
+  transform: scale(1.18);
+  box-shadow: 0 0 0 3px oklch(1 0 0), 0 0 0 5px var(--ink), 0 2px 6px oklch(0.2 0.02 220 / 0.3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+  .zip-dot {
+    transition: none;
+  }
+  * {
+    scroll-behavior: auto !important;
+  }
 }

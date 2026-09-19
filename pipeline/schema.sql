@@ -53,3 +53,6 @@ create policy "public read" on insights for select using (true);
 alter table locations add column if not exists age_bands jsonb;
 alter table locations add column if not exists income_brackets jsonb;
 alter table insights add column if not exists vibe text;
+
+-- Vibe is per zip (derived from all scraped business types), so it lives on locations.
+alter table locations add column if not exists vibe text;

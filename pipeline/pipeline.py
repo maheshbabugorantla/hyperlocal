@@ -99,7 +99,8 @@ APIFY_MEMORY_MB = 4096           # x PARALLEL_COMBOS must stay under the account
 APIFY_RUN_TIMEOUT_S = 600
 APIFY_START_RETRIES = 20
 PARALLEL_COMBOS = 3
-TOP_N_INSIGHTS = 5
+TOP_N_INSIGHTS = 5              # ranks framed as "top" / "bottom" in insight prompts
+GEMINI_PARALLEL = 8
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
 
 REQUIRED_ENV = ["SUPABASE_URL", "SUPABASE_SERVICE_KEY", "CENSUS_API_KEY", "APIFY_TOKEN", "GEMINI_API_KEY"]
@@ -383,13 +384,21 @@ def process(zip_code, business_type, db=None):
     return scores
 
 
-def insight_prompt(loc, business_type, score, competitors):
+def insight_prompt(loc, business_type, score, competitors, rank, total):
     comp_lines = "\n".join(
         f"- {c['name']} ({c['category']}), rating {c['rating']}, {c['review_count']} reviews"
         for c in competitors[:15]
     ) or "- none found in this zip"
+    if rank <= TOP_N_INSIGHTS:
+        ask = f"explain why this zip scored well for a {business_type}. Lead with the single biggest reason"
+    elif rank > total - TOP_N_INSIGHTS:
+        ask = (f"explain honestly why this zip ranks near the bottom for a {business_type}. Lead with the biggest "
+               "drag on the score, then mention any genuine bright spot")
+    else:
+        ask = (f"explain why this zip lands mid-pack for a {business_type}: name its main strength and the "
+               "main thing holding it back")
     return f"""You are advising someone opening a {business_type} in Austin, TX.
-Zip {loc['zip']} ({loc['name']}) ranked in the top {TOP_N_INSIGHTS} of 17 central Austin zips.
+Zip {loc['zip']} ({loc['name']}) ranks #{rank} of {total} central Austin zips for a {business_type}.
 
 Scores (0-100): total {score['total_score']}, demand {score['demand_score']},
 competition {score['competition_score']} (higher = fewer competitors), foot traffic proxy {score['traffic_score']}.
@@ -404,9 +413,9 @@ Household income brackets (households): {', '.join(f"{b['label']} {b['count']}" 
 Existing {business_type} competitors located in this zip ({len(competitors)} total):
 {comp_lines}
 
-In 2-3 short plain-English sentences (under 60 words total), explain why this zip scored well
-for a {business_type}. Lead with the single biggest reason, cite one or two specific numbers,
-and don't restate the score itself. No preamble, no bullet points."""
+In 2-3 short plain-English sentences (under 60 words total), {ask}. Cite one or two specific
+numbers and don't restate the score itself. Use ONLY the facts above: no assumptions about housing,
+amenities, landmarks, or anything else not listed. No preamble, no bullet points."""
 
 
 def rescore(db=None):
@@ -423,64 +432,80 @@ def rescore(db=None):
     print_summary(db)
 
 
-def generate_insights(db=None):
+def generate_insights(db=None, types=None):
+    """A written insight for every zip x business type, framed by the zip's rank."""
     db = db or supabase()
     client = gemini()
-    for business_type in BUSINESS_TYPES:
-        top = (
-            db.table("scores").select("*").eq("business_type", business_type)
-            .order("total_score", desc=True).limit(TOP_N_INSIGHTS).execute().data
+    locs = {l["zip"]: l for l in db.table("locations").select("*").execute().data}
+
+    def write(business_type, score, rank, total):
+        competitors = (
+            db.table("competitors").select("*").eq("zip", score["zip"])
+            .eq("search_type", business_type).order("review_count", desc=True).execute().data
         )
-        db.table("insights").delete().eq("business_type", business_type).execute()
-        for score in top:
-            try:
-                loc = db.table("locations").select("*").eq("zip", score["zip"]).execute().data[0]
-                competitors = (
-                    db.table("competitors").select("*").eq("zip", score["zip"])
-                    .eq("search_type", business_type).order("review_count", desc=True).execute().data
-                )
-                text = client.models.generate_content(
-                    model=GEMINI_MODEL, contents=insight_prompt(loc, business_type, score, competitors)
-                ).text.strip()
-                db.table("insights").insert(
-                    {"zip": score["zip"], "business_type": business_type, "summary": text}
-                ).execute()
-                print(f"  insight {business_type} {score['zip']}: {text[:80]}...")
-            except Exception as exc:  # noqa: BLE001 - log and keep going
-                print(f"  FAILED insight {business_type} {score['zip']}: {exc}")
+        prompt = insight_prompt(locs[score["zip"]], business_type, score, competitors, rank, total)
+        return client.models.generate_content(model=GEMINI_MODEL, contents=prompt).text.strip()
+
+    for business_type in types or BUSINESS_TYPES:
+        ranked = (
+            db.table("scores").select("*").eq("business_type", business_type)
+            .order("total_score", desc=True).execute().data
+        )
+        rows = []
+        with ThreadPoolExecutor(max_workers=GEMINI_PARALLEL) as pool:
+            futures = {
+                pool.submit(write, business_type, score, rank, len(ranked)): score["zip"]
+                for rank, score in enumerate(ranked, start=1)
+            }
+            for fut in as_completed(futures):
+                try:
+                    rows.append({"zip": futures[fut], "business_type": business_type, "summary": fut.result()})
+                except Exception as exc:  # noqa: BLE001 - log and keep going
+                    print(f"  FAILED insight {business_type} {futures[fut]}: {exc}")
+        # Swap the whole type at once so the site never shows a half-empty set.
+        if rows:
+            db.table("insights").delete().eq("business_type", business_type).execute()
+            db.table("insights").insert(rows).execute()
+        print(f"  insights {business_type}: {len(rows)}/{len(ranked)}")
 
 
 def vibe_prompt(loc, businesses):
     lines = "\n".join(
         f"- {b['name']} ({b['category']}), rating {b['rating']}, {b['review_count']} reviews"
-        for b in businesses[:40]
+        for b in businesses
     )
-    return f"""Below is every coffee shop, food truck and boutique we found on Google Maps inside Austin zip
-{loc['zip']} ({loc['name']}), most-reviewed first. Using ONLY this list (no outside knowledge about the
-neighborhood, no landmarks, no history), describe the neighborhood's commercial vibe in 2 short sentences,
-under 45 words: what kind of places dominate, and what that suggests about who goes there.
-If the list is short, say the area is thin on these businesses. No preamble.
+    return f"""Below are the most-reviewed local businesses we found on Google Maps inside Austin zip
+{loc['zip']} ({loc['name']}), across coffee shops, food trucks, boutiques, med spas, tattoo studios and
+laundromats. Using ONLY this list (no outside knowledge about the neighborhood, no landmarks, no history),
+describe the neighborhood's commercial vibe in 2 short sentences, under 45 words: what kind of places
+dominate, and what that suggests about who goes there. If the list is short, say the area is thin on
+these businesses. No preamble.
 
 {lines or '- (no businesses found)'}"""
 
 
 def generate_vibes(db=None):
-    """One grounded 'vibe' line per zip that has an insight, written to every insight row for that zip."""
+    """One grounded 'vibe' line per zip, stored on locations.vibe."""
     db = db or supabase()
     client = gemini()
-    zips = sorted({r["zip"] for r in db.table("insights").select("zip").execute().data})
-    for zip_code in zips:
-        try:
-            loc = db.table("locations").select("*").eq("zip", zip_code).execute().data[0]
-            businesses = (
-                db.table("competitors").select("name,category,rating,review_count").eq("zip", zip_code)
-                .order("review_count", desc=True).limit(40).execute().data
-            )
-            text = client.models.generate_content(model=GEMINI_MODEL, contents=vibe_prompt(loc, businesses)).text.strip()
-            db.table("insights").update({"vibe": text}).eq("zip", zip_code).execute()
-            print(f"  vibe {zip_code}: {text[:90]}...")
-        except Exception as exc:  # noqa: BLE001
-            print(f"  FAILED vibe {zip_code}: {exc}")
+    locs = db.table("locations").select("*").execute().data
+
+    def write(loc):
+        businesses = (
+            db.table("competitors").select("name,category,rating,review_count").eq("zip", loc["zip"])
+            .order("review_count", desc=True).limit(50).execute().data
+        )
+        text = client.models.generate_content(model=GEMINI_MODEL, contents=vibe_prompt(loc, businesses)).text.strip()
+        db.table("locations").update({"vibe": text}).eq("zip", loc["zip"]).execute()
+        return text
+
+    with ThreadPoolExecutor(max_workers=GEMINI_PARALLEL) as pool:
+        futures = {pool.submit(write, loc): loc["zip"] for loc in locs}
+        for fut in as_completed(futures):
+            try:
+                print(f"  vibe {futures[fut]}: {fut.result()[:80]}...")
+            except Exception as exc:  # noqa: BLE001
+                print(f"  FAILED vibe {futures[fut]}: {exc}")
 
 
 def enrich(db=None):
@@ -526,7 +551,7 @@ def run_all(types=None):
     print(f"\n{len(combos) - len(failures)}/{len(combos)} combinations succeeded")
     if failures:
         print("Failed:", failures)
-    generate_insights(db)
+    generate_insights(db, types)
     generate_vibes(db)
     print_summary(db)
 

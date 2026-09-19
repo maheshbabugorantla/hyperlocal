@@ -208,3 +208,19 @@ body {
     scroll-behavior: auto !important;
   }
 }
+
+/* ---------- Wordmark ---------- */
+.wordmark {
+  font-family: var(--font-fraunces), Georgia, serif;
+  letter-spacing: -0.02em;
+}
+.wordmark-hyper {
+  font-style: italic;
+  font-weight: 800;
+  font-variation-settings: "SOFT" 100, "WONK" 1, "opsz" 144;
+  margin-right: 0.02em;
+}
+.wordmark-local {
+  font-weight: 600;
+  font-variation-settings: "SOFT" 50, "WONK" 0, "opsz" 144;
+}

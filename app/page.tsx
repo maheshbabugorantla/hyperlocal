@@ -1,5 +1,6 @@
 import Dashboard from "./components/Dashboard";
 import { HyperlocalMark } from "./components/HyperlocalMark";
+import { Wordmark } from "./components/Wordmark";
 
 export default function Home() {
   return (
@@ -7,7 +8,9 @@ export default function Home() {
       <header className="flex flex-wrap items-center justify-between gap-x-8 gap-y-2 border-b border-line bg-bg px-5 pt-3 pb-3">
         <div className="flex min-w-0 items-center gap-2.5">
           <HyperlocalMark className="h-9 w-9 shrink-0 text-brand-deep" />
-          <h1 className="text-[22px] leading-tight font-bold tracking-[-0.015em] text-brand-deep">Hyperlocal</h1>
+          <h1 className="pb-1 text-[30px]" aria-label="Hyperlocal">
+            <Wordmark />
+          </h1>
         </div>
         <div className="text-[12px] leading-snug text-ink-3 md:text-right">
           <p>

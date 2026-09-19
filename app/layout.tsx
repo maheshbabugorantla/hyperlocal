@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Public_Sans, Source_Serif_4 } from "next/font/google";
+import { Fraunces, Public_Sans, Source_Serif_4 } from "next/font/google";
 import "./globals.css";
 
 const sans = Public_Sans({
@@ -13,6 +13,14 @@ const serif = Source_Serif_4({
   style: ["normal", "italic"],
 });
 
+// Wordmark only: wonky/soft axes give the title-card bounce.
+const display = Fraunces({
+  variable: "--font-fraunces",
+  subsets: ["latin"],
+  style: ["normal", "italic"],
+  axes: ["SOFT", "WONK", "opsz"],
+});
+
 export const metadata: Metadata = {
   title: "Hyperlocal",
   description: "Find the block where your business belongs: every neighborhood scored on demand, competition and foot traffic. Now mapping Austin, TX.",
@@ -20,7 +28,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={`${sans.variable} ${serif.variable} h-full antialiased`}>
+    <html lang="en" className={`${sans.variable} ${serif.variable} ${display.variable} h-full antialiased`}>
       <body className="flex min-h-full flex-col">{children}</body>
     </html>
   );

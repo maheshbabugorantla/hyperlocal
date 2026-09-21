@@ -57,6 +57,24 @@ const GLYPHS: Record<string, ReactElement> = {
       <path d="M8.84 13.5q1.58-1.2 3.16 0t3.16 0A3.2 3.2 0 1 1 8.84 13.5z" style={ACCENT} stroke="none" />
     </>
   ),
+  "car wash": (
+    <>
+      <path d="M3 17v-4a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v4z" />
+      <path d="M5 11l3-3h8l3 3" />
+      <path d="M6 17v2m12-2v2M10.5 14h3" />
+      <circle cx={7.5} cy={14} r={1} fill="currentColor" stroke="none" />
+      <circle cx={16.5} cy={14} r={1} fill="currentColor" stroke="none" />
+      <path d="M5 6a2.25 2.25 0 1 1 0-4.5A2.25 2.25 0 0 1 5 6zm5.25-2.25a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5zM18.5.75l1.1 1.65 1.65 1.1-1.65 1.1-1.1 1.65-1.1-1.65-1.65-1.1 1.65-1.1z" style={ACCENT} stroke="none" />
+    </>
+  ),
+  "quick lube": (
+    <>
+      <path d="M3 19v-6a2 2 0 0 1 2-2h7l3 3v5z" />
+      <path d="M6 11V9h4v2" />
+      <path d="M13.5 12.5 19 7" />
+      <path d="M19.5 11l1.6 2.3a2 2 0 1 1-3.2 0z" style={ACCENT} stroke="none" />
+    </>
+  ),
 };
 
 const FALLBACK = <circle cx={12} cy={12} r={8} />;

@@ -33,10 +33,29 @@ load_dotenv(ROOT / ".env")
 # Configuration
 # ---------------------------------------------------------------------------
 
-ZIPS = [
+AUSTIN_ZIPS = [
     "78701", "78702", "78703", "78704", "78705", "78721", "78722", "78723", "78731",
     "78741", "78745", "78748", "78751", "78752", "78756", "78757", "78758",
 ]
+# Residential ZCTAs only; PO-box zips (78630, 78680, 78682, 78683, 78691) have no Census data.
+SUBURB_ZIPS = {
+    "78613": "Cedar Park",
+    "78664": "Round Rock",
+    "78665": "Round Rock",
+    "78681": "Round Rock",
+    "78660": "Pflugerville",
+    "78634": "Hutto",
+    "78642": "Liberty Hill",
+    "76574": "Taylor",
+}
+ZIPS = AUSTIN_ZIPS + list(SUBURB_ZIPS)
+ZIP_CITY = {**{z: "Austin" for z in AUSTIN_ZIPS}, **SUBURB_ZIPS}
+
+
+def region_of(city):
+    """Zips are ranked (for insight wording) against their own region."""
+    return "central Austin" if city == "Austin" else "Austin-area suburbs"
+
 BUSINESS_TYPES = ["coffee shop", "food truck", "boutique retail", "med spa", "tattoo shop", "laundromat"]
 
 # Display labels only: ZCTAs have no official names.
@@ -58,6 +77,14 @@ ZIP_NAMES = {
     "78756": "Brentwood",
     "78757": "Crestview / Allandale",
     "78758": "North Burnet / The Domain",
+    "78613": "Cedar Park",
+    "78664": "Old Town Round Rock",
+    "78665": "Northeast Round Rock / Teravista",
+    "78681": "West Round Rock / Brushy Creek",
+    "78660": "Pflugerville",
+    "78634": "Hutto",
+    "78642": "Liberty Hill",
+    "76574": "Taylor",
 }
 
 # Score weights (same for every business type for now).
@@ -95,6 +122,7 @@ TRAFFIC_REVIEWS_CAP = 20000      # total nearby reviews at which traffic score m
 ACS_YEAR = 2024                  # ACS 5-year 2020-2024, current release
 APIFY_ACTOR = "compass~crawler-google-places"
 APIFY_MAX_PLACES = 60
+MAX_SEARCH_RADIUS_KM = 12        # large rural suburb zips (Taylor ~11 km, Liberty Hill ~10 km)
 APIFY_MEMORY_MB = 4096           # x PARALLEL_COMBOS must stay under the account's 16 GB limit
 APIFY_RUN_TIMEOUT_S = 600
 APIFY_START_RETRIES = 20
@@ -174,7 +202,7 @@ def zip_radius_km(zip_code):
     """Radius of a circle with the zip's land area, clamped to a sane search range."""
     zip_coords(zip_code)
     land_m2 = _coords[zip_code][2]
-    return round(min(max(math.sqrt(land_m2 / math.pi) / 1000, 1.5), 5), 2)
+    return round(min(max(math.sqrt(land_m2 / math.pi) / 1000, 1.5), MAX_SEARCH_RADIUS_KM), 2)
 
 
 def acs(get, zip_code):
@@ -242,6 +270,7 @@ def demographics(zip_code):
     return {
         "zip": zip_code,
         "name": ZIP_NAMES.get(zip_code, zip_code),
+        "city": ZIP_CITY.get(zip_code, "Austin"),
         "lat": lat,
         "lng": lng,
         "population": n(age, "B01001_001E"),
@@ -384,7 +413,7 @@ def process(zip_code, business_type, db=None):
     return scores
 
 
-def insight_prompt(loc, business_type, score, competitors, rank, total):
+def insight_prompt(loc, business_type, score, competitors, rank, total, region):
     comp_lines = "\n".join(
         f"- {c['name']} ({c['category']}), rating {c['rating']}, {c['review_count']} reviews"
         for c in competitors[:15]
@@ -397,8 +426,8 @@ def insight_prompt(loc, business_type, score, competitors, rank, total):
     else:
         ask = (f"explain why this zip lands mid-pack for a {business_type}: name its main strength and the "
                "main thing holding it back")
-    return f"""You are advising someone opening a {business_type} in Austin, TX.
-Zip {loc['zip']} ({loc['name']}) ranks #{rank} of {total} central Austin zips for a {business_type}.
+    return f"""You are advising someone opening a {business_type} in {loc.get('city') or 'Austin'}, TX.
+Zip {loc['zip']} ({loc['name']}) ranks #{rank} of {total} {region} zips for a {business_type}.
 
 Scores (0-100): total {score['total_score']}, demand {score['demand_score']},
 competition {score['competition_score']} (higher = fewer competitors), foot traffic proxy {score['traffic_score']}.
@@ -432,41 +461,54 @@ def rescore(db=None):
     print_summary(db)
 
 
-def generate_insights(db=None, types=None):
-    """A written insight for every zip x business type, framed by the zip's rank."""
+def generate_insights(db=None, types=None, zips=None):
+    """A written insight for every zip x business type, framed by the zip's rank within its region.
+
+    With `zips`, only those zips' insights are (re)written; everything else is left untouched.
+    """
     db = db or supabase()
     client = gemini()
     locs = {l["zip"]: l for l in db.table("locations").select("*").execute().data}
 
-    def write(business_type, score, rank, total):
+    def write(business_type, score, rank, total, region):
         competitors = (
             db.table("competitors").select("*").eq("zip", score["zip"])
             .eq("search_type", business_type).order("review_count", desc=True).execute().data
         )
-        prompt = insight_prompt(locs[score["zip"]], business_type, score, competitors, rank, total)
+        prompt = insight_prompt(locs[score["zip"]], business_type, score, competitors, rank, total, region)
         return client.models.generate_content(model=GEMINI_MODEL, contents=prompt).text.strip()
 
     for business_type in types or BUSINESS_TYPES:
-        ranked = (
+        all_scores = (
             db.table("scores").select("*").eq("business_type", business_type)
             .order("total_score", desc=True).execute().data
         )
+        by_region = {}
+        for score in all_scores:
+            region = region_of(locs[score["zip"]].get("city") or ZIP_CITY.get(score["zip"], "Austin"))
+            by_region.setdefault(region, []).append(score)
+        jobs = [
+            (score, rank, len(ranked), region)
+            for region, ranked in by_region.items()
+            for rank, score in enumerate(ranked, start=1)
+            if not zips or score["zip"] in zips
+        ]
         rows = []
         with ThreadPoolExecutor(max_workers=GEMINI_PARALLEL) as pool:
-            futures = {
-                pool.submit(write, business_type, score, rank, len(ranked)): score["zip"]
-                for rank, score in enumerate(ranked, start=1)
-            }
+            futures = {pool.submit(write, business_type, *job): job[0]["zip"] for job in jobs}
             for fut in as_completed(futures):
                 try:
                     rows.append({"zip": futures[fut], "business_type": business_type, "summary": fut.result()})
                 except Exception as exc:  # noqa: BLE001 - log and keep going
                     print(f"  FAILED insight {business_type} {futures[fut]}: {exc}")
-        # Swap the whole type at once so the site never shows a half-empty set.
+        # Swap the affected zips of this type at once so the site never shows a half-empty set.
         if rows:
-            db.table("insights").delete().eq("business_type", business_type).execute()
+            query = db.table("insights").delete().eq("business_type", business_type)
+            if zips:
+                query = query.in_("zip", [r["zip"] for r in rows])
+            query.execute()
             db.table("insights").insert(rows).execute()
-        print(f"  insights {business_type}: {len(rows)}/{len(ranked)}")
+        print(f"  insights {business_type}: {len(rows)}/{len(jobs)}")
 
 
 def vibe_prompt(loc, businesses):
@@ -474,8 +516,8 @@ def vibe_prompt(loc, businesses):
         f"- {b['name']} ({b['category']}), rating {b['rating']}, {b['review_count']} reviews"
         for b in businesses
     )
-    return f"""Below are the most-reviewed local businesses we found on Google Maps inside Austin zip
-{loc['zip']} ({loc['name']}), across coffee shops, food trucks, boutiques, med spas, tattoo studios and
+    return f"""Below are the most-reviewed local businesses we found on Google Maps inside zip
+{loc['zip']} ({loc['name']}, {loc.get('city') or 'Austin'}, TX), across coffee shops, food trucks, boutiques, med spas, tattoo studios and
 laundromats. Using ONLY this list (no outside knowledge about the neighborhood, no landmarks, no history),
 describe the neighborhood's commercial vibe in 2 short sentences, under 45 words: what kind of places
 dominate, and what that suggests about who goes there. If the list is short, say the area is thin on
@@ -484,11 +526,11 @@ these businesses. No preamble.
 {lines or '- (no businesses found)'}"""
 
 
-def generate_vibes(db=None):
+def generate_vibes(db=None, zips=None):
     """One grounded 'vibe' line per zip, stored on locations.vibe."""
     db = db or supabase()
     client = gemini()
-    locs = db.table("locations").select("*").execute().data
+    locs = [l for l in db.table("locations").select("*").execute().data if not zips or l["zip"] in zips]
 
     def write(loc):
         businesses = (
@@ -530,15 +572,16 @@ def print_summary(db):
         print(f"{r['business_type']:<16} {r['zip']:<6} {names.get(r['zip'], ''):<30} {r['total_score']:>6}")
 
 
-def run_all(types=None):
+def run_all(types=None, zips=None):
     db = supabase()
+    zips = zips or ZIPS
     # Demographics once per zip, sequentially, before the parallel scrapes.
-    for z in ZIPS:
+    for z in zips:
         try:
             ensure_location(db, z)
         except Exception as exc:  # noqa: BLE001
             print(f"  FAILED location {z}: {exc}")
-    combos = [(z, t) for t in (types or BUSINESS_TYPES) for z in ZIPS]
+    combos = [(z, t) for t in (types or BUSINESS_TYPES) for z in zips]
     failures = []
     with ThreadPoolExecutor(max_workers=PARALLEL_COMBOS) as pool:
         futures = {pool.submit(process, z, t): (z, t) for z, t in combos}
@@ -551,8 +594,8 @@ def run_all(types=None):
     print(f"\n{len(combos) - len(failures)}/{len(combos)} combinations succeeded")
     if failures:
         print("Failed:", failures)
-    generate_insights(db, types)
-    generate_vibes(db)
+    generate_insights(db, types, zips)
+    generate_vibes(db, zips)
     print_summary(db)
 
 
@@ -629,6 +672,7 @@ def main():
     run.add_argument("--type", choices=BUSINESS_TYPES)
     run.add_argument("--all", action="store_true")
     run.add_argument("--types", nargs="+", choices=BUSINESS_TYPES, help="with --all: only these types")
+    run.add_argument("--zips", nargs="+", choices=ZIPS, help="with --all: only these zips")
     sub.add_parser("insights")
     sub.add_parser("summary")
     sub.add_parser("schema")
@@ -650,7 +694,7 @@ def main():
     elif args.cmd == "summary":
         print_summary(supabase())
     elif args.all:
-        run_all(args.types)
+        run_all(args.types, args.zips)
     elif args.zip and args.type:
         process(args.zip, args.type)
     else:

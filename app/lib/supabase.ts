@@ -68,9 +68,12 @@ function bands(v: unknown): Band[] | null {
   return out.length ? out : null;
 }
 
+export const LIVE_CITY = "Austin";
+
 export async function fetchResults(type: BusinessType): Promise<ZipResult[]> {
   const [locations, scores, insights, competitors] = await Promise.all([
-    supabase.from("locations").select("*"),
+    // Suburb zips are in the database but stay hidden until the city switcher ships.
+    supabase.from("locations").select("*").eq("city", LIVE_CITY),
     supabase.from("scores").select("*").eq("business_type", type),
     // "*" rather than "zip,summary,vibe" so a missing vibe column degrades instead of failing the page
     supabase.from("insights").select("*").eq("business_type", type),

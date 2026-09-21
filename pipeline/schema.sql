@@ -59,3 +59,7 @@ alter table locations add column if not exists vibe text;
 
 -- Multi-city: which city/town each zip belongs to (drives the city switcher).
 alter table locations add column if not exists city text;
+
+-- Car-service demand (ACS B08201 vehicles, B08301 commute mode).
+alter table locations add column if not exists vehicles integer;
+alter table locations add column if not exists drove_alone_share numeric;

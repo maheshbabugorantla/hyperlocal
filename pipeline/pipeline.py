@@ -56,7 +56,17 @@ def region_of(city):
     """Zips are ranked (for insight wording) against their own region."""
     return "central Austin" if city == "Austin" else "Austin-area suburbs"
 
-BUSINESS_TYPES = ["coffee shop", "food truck", "boutique retail", "med spa", "tattoo shop", "laundromat"]
+BUSINESS_TYPES = [
+    "coffee shop", "food truck", "boutique retail", "med spa", "tattoo shop", "laundromat", "car wash", "quick lube",
+]
+# Google Maps search string when it differs from the business type.
+SEARCH_STRINGS = {"quick lube": "oil change"}
+# Keep only these Google categories. Broad searches pull in gas stations, detailers and
+# general repair shops (probed 2026-09-20: 17 of 51 "car wash" hits in 78613 were car washes).
+CATEGORY_ALLOW = {
+    "car wash": {"Car wash"},
+    "quick lube": {"Oil change service"},
+}
 
 # Display labels only: ZCTAs have no official names.
 ZIP_NAMES = {
@@ -113,6 +123,10 @@ DEMAND_PROFILES = {
     },
 }
 DEFAULT_DEMAND_DESCRIPTION = "adults 20-44 and households earning $75k+"
+# Car-service demand follows cars, not age or income (ACS B08201 vehicles, B08301 commute mode).
+VEHICLE_TYPES = {"car wash", "quick lube"}
+VEHICLE_DEMAND_DESCRIPTION = "vehicles kept by households here, and the share of workers who drive alone"
+VEHICLE_CAP = 50000
 
 # Fixed reference scales so every row scores 0-100 on its own.
 DEMAND_POP_20_44_CAP = 20000     # 20-44 population at which demand's population half maxes out
@@ -241,6 +255,17 @@ def acs_count(table, var):
     return value if value >= 0 else 0  # Census uses large negatives for "not available"
 
 
+def vehicle_profile(zip_code):
+    """Total household vehicles (4+ counted as 4) and drive-alone share of commuters."""
+    v = acs("group(B08201)", zip_code)
+    c = acs("B08301_001E,B08301_003E", zip_code)
+    workers = acs_count(c, "B08301_001E")
+    return {
+        "vehicles": sum(k * acs_count(v, f"B08201_{k + 2:03d}E") for k in range(1, 5)),
+        "drove_alone_share": round(acs_count(c, "B08301_003E") / workers, 4) if workers else 0,
+    }
+
+
 def demographic_shape(age, income):
     return {
         "age_bands": [
@@ -280,6 +305,7 @@ def demographics(zip_code):
         "median_income": median_income if median_income > 0 else None,
         "pct_hh_income_75k_plus": round(hh_75k_plus / households, 4) if households else 0,
         **demographic_shape(age, income),
+        **vehicle_profile(zip_code),
     }
 
 
@@ -328,13 +354,16 @@ def scrape_competitors(zip_code, business_type):
     """
     lat, lng = zip_coords(zip_code)
     places = apify_run({
-        "searchStringsArray": [business_type],
+        "searchStringsArray": [SEARCH_STRINGS.get(business_type, business_type)],
         "customGeolocation": {"type": "Point", "coordinates": [lng, lat], "radiusKm": zip_radius_km(zip_code)},
         "maxCrawledPlacesPerSearch": APIFY_MAX_PLACES,
         "language": "en",
         "skipClosedPlaces": True,
     })
     in_zip = [p for p in places if str(p.get("postalCode") or "").startswith(zip_code)]
+    allowed = CATEGORY_ALLOW.get(business_type)
+    if allowed:
+        in_zip = [p for p in in_zip if p.get("categoryName") in allowed]
     return [
         {
             "zip": zip_code,
@@ -353,6 +382,11 @@ def scrape_competitors(zip_code, business_type):
 # ---------------------------------------------------------------------------
 
 def demand_score(loc, business_type):
+    if business_type in VEHICLE_TYPES:
+        return 100 * (
+            0.5 * min((loc.get("vehicles") or 0) / VEHICLE_CAP, 1)
+            + 0.5 * float(loc.get("drove_alone_share") or 0)
+        )
     profile = DEMAND_PROFILES.get(business_type)
     if profile is None:
         return 100 * (
@@ -432,7 +466,8 @@ Zip {loc['zip']} ({loc['name']}) ranks #{rank} of {total} {region} zips for a {b
 Scores (0-100): total {score['total_score']}, demand {score['demand_score']},
 competition {score['competition_score']} (higher = fewer competitors), foot traffic proxy {score['traffic_score']}.
 Weights: demand {W_DEMAND}, competition {W_COMPETITION}, traffic {W_TRAFFIC}.
-Demand for a {business_type} is measured as: {DEMAND_PROFILES.get(business_type, {}).get("describe", DEFAULT_DEMAND_DESCRIPTION)}.
+Demand for a {business_type} is measured as: {VEHICLE_DEMAND_DESCRIPTION if business_type in VEHICLE_TYPES else DEMAND_PROFILES.get(business_type, {}).get("describe", DEFAULT_DEMAND_DESCRIPTION)}.
+Vehicles kept by households: {loc.get('vehicles')}; share of workers who drive alone: {float(loc.get('drove_alone_share') or 0):.0%}.
 
 Demographics (Census ACS 5-year): population {loc['population']}, ages 20-44 {loc['pop_20_44']},
 median household income ${loc['median_income']}, {float(loc['pct_hh_income_75k_plus']):.0%} of households earn $75k+.
@@ -556,7 +591,7 @@ def enrich(db=None):
     for row in db.table("locations").select("zip").execute().data:
         z = row["zip"]
         try:
-            shape = demographic_shape(acs("group(B01001)", z), acs("group(B19001)", z))
+            shape = {**demographic_shape(acs("group(B01001)", z), acs("group(B19001)", z)), **vehicle_profile(z)}
             db.table("locations").update(shape).eq("zip", z).execute()
             print(f"  shape {z}: {[b['count'] for b in shape['age_bands']]}")
         except Exception as exc:  # noqa: BLE001

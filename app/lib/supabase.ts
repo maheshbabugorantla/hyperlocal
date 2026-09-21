@@ -6,12 +6,14 @@ export const supabase = createClient(
 );
 
 export const BUSINESS_TYPES = [
-  { value: "coffee shop", label: "Coffee shop" },
-  { value: "food truck", label: "Food truck / pop-up" },
-  { value: "boutique retail", label: "Boutique retail" },
-  { value: "med spa", label: "Med spa" },
-  { value: "tattoo shop", label: "Tattoo studio" },
-  { value: "laundromat", label: "Laundromat" },
+  { value: "coffee shop", label: "Coffee shop", short: "Coffee shop" },
+  { value: "food truck", label: "Food truck / pop-up", short: "Food truck" },
+  { value: "boutique retail", label: "Boutique retail", short: "Boutique" },
+  { value: "med spa", label: "Med spa", short: "Med spa" },
+  { value: "tattoo shop", label: "Tattoo studio", short: "Tattoo" },
+  { value: "laundromat", label: "Laundromat", short: "Laundromat" },
+  { value: "car wash", label: "Car wash", short: "Car wash" },
+  { value: "quick lube", label: "Quick lube / oil change", short: "Quick lube" },
 ] as const;
 
 export type BusinessType = (typeof BUSINESS_TYPES)[number]["value"];
@@ -24,6 +26,8 @@ export const DEMAND_MEANS: Record<BusinessType, string> = {
   "med spa": "adults 35–64 + households earning $100k+",
   "tattoo shop": "adults 18–34, any income",
   laundromat: "adults 18–34 + households earning under $50k",
+  "car wash": "vehicles kept by households + share who drive alone to work",
+  "quick lube": "vehicles kept by households + share who drive alone to work",
 };
 
 export type ZipResult = {
@@ -35,6 +39,8 @@ export type ZipResult = {
   median_income: number | null;
   pct_hh_income_75k_plus: number;
   pop_20_44: number;
+  vehicles: number | null;
+  drove_alone_share: number | null;
   demand_score: number;
   competition_score: number;
   traffic_score: number;
@@ -102,6 +108,8 @@ export async function fetchResults(type: BusinessType): Promise<ZipResult[]> {
         median_income: l.median_income,
         pct_hh_income_75k_plus: Number(l.pct_hh_income_75k_plus),
         pop_20_44: l.pop_20_44,
+        vehicles: l.vehicles ?? null,
+        drove_alone_share: l.drove_alone_share != null ? Number(l.drove_alone_share) : null,
         demand_score: Number(s.demand_score),
         competition_score: Number(s.competition_score),
         traffic_score: Number(s.traffic_score),
@@ -184,6 +192,8 @@ export function factorRanks(results: ZipResult[]) {
 const POP_CAP = 20000; // DEMAND_POP_20_44_CAP
 const COMPETITION_SATURATION = 60;
 const TRAFFIC_REVIEWS_CAP = 20000;
+const VEHICLE_CAP = 50000;
+const VEHICLE_TYPES: BusinessType[] = ["car wash", "quick lube"];
 
 /** Per-type demand profile; null = the original 20–44 + $75k+ signal. */
 const DEMAND_PROFILES: Partial<Record<BusinessType, { ages: string[]; agesText: string; incomes: string[] | null; incomesText: string }>> = {
@@ -201,6 +211,12 @@ export type FactorHelpText = { how: string; here: string };
 
 /** Plain-English "how is this computed" plus this zip's own inputs, for one factor. */
 export function factorHelp(key: FactorKey, type: BusinessType, r: ZipResult): FactorHelpText {
+  if (key === "demand_score" && VEHICLE_TYPES.includes(type)) {
+    return {
+      how: `How many cars need this nearby. Half comes from vehicles kept by households here (full marks at ${fmt(VEHICLE_CAP)}), half from the share of workers who drive alone to work. Census ACS 2020–24.`,
+      here: `${fmt(r.vehicles ?? 0)} household vehicles · ${pct(r.drove_alone_share ?? 0)} of workers drive alone`,
+    };
+  }
   if (key === "demand_score") {
     const p = DEMAND_PROFILES[type];
     if (!p) {

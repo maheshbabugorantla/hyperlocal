@@ -34,6 +34,8 @@ const NOUN: Record<BusinessType, string> = {
   "med spa": "a med spa",
   "tattoo shop": "a tattoo studio",
   laundromat: "a laundromat",
+  "car wash": "a car wash",
+  "quick lube": "a quick lube",
 };
 
 function MapSkeleton({ label }: { label: string }) {
@@ -482,7 +484,7 @@ function TypeSelector({
       <div
         role="tablist"
         aria-labelledby={id}
-        className="mt-2 grid grid-cols-3 gap-[3px] rounded-lg border border-line-strong bg-panel p-[3px]"
+        className="mt-2 grid grid-cols-4 gap-[3px] rounded-lg border border-line-strong bg-panel p-[3px]"
       >
         {BUSINESS_TYPES.map((b) => {
           const active = b.value === type;
@@ -492,12 +494,13 @@ function TypeSelector({
               role="tab"
               aria-selected={active}
               onClick={() => onChange(b.value)}
-              className={`type-tab flex flex-col items-center justify-center gap-1 rounded-md px-1.5 py-2 text-center text-[12.5px] leading-tight font-semibold lg:flex-row lg:gap-1.5 lg:px-1.5 lg:text-left lg:whitespace-nowrap transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-brand ${
+              title={b.label}
+              className={`type-tab flex flex-col items-center justify-center gap-1 rounded-md px-1 py-2 text-center text-[12px] leading-tight font-semibold whitespace-nowrap transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-brand ${
                 active ? "bg-brand-deep text-white shadow-sm" : "text-ink-2 hover:bg-bg hover:text-ink"
               }`}
             >
               <TypeIcon type={b.value} className="h-[22px] w-[22px] shrink-0" />
-              <span>{b.label}</span>
+              <span>{b.short}</span>
             </button>
           );
         })}

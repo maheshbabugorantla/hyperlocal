@@ -1,5 +1,7 @@
 # Hyperlocal
 
+> 🏆 **3rd place at the [Cursor Austin × AITX Hackathon](https://luma.com/cursor-austin-grok-001)** (Austin, TX, September 19, 2026). Built during the event by [Mahesh Babu Gorantla](https://github.com/maheshbabugorantla), [Sreedhar Arolla](https://github.com/sreedhararolla), [Chase Young](https://github.com/Chaser263), and [Dennis Popov](https://github.com/dennycrafter).
+
 **Find the block where your business belongs.** Hyperlocal scores every neighborhood for a small business on who lives there, who you'd compete with, and how busy the streets already are. Pick a location on evidence, not gut feel.
 
 - **Live app:** https://hyperlocal-sigma.vercel.app
@@ -12,6 +14,8 @@ The app shows a map of real zip outlines shaded by score, a ranked top 5 per bus
 - a neighborhood "vibe"
 - the actual competitors you'd face
 - a hover explanation of how each sub-score is computed
+
+![Hyperlocal demo: map popup, score explanation, zip detail, and switching business types](docs/images/demo.gif)
 
 ## Quick start
 

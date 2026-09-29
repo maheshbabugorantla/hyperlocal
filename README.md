@@ -1,6 +1,6 @@
 # Hyperlocal
 
-> 🏆 **3rd place at the [Cursor Austin × AITX Hackathon](https://luma.com/cursor-austin-grok-001)** (Austin, TX, September 19, 2026). Built during the event by [Mahesh Babu Gorantla](https://github.com/maheshbabugorantla), [Sreedhar Arolla](https://github.com/sreedhararolla), [Chase Young](https://github.com/Chaser263), and [Dennis Popov](https://github.com/dennycrafter).
+> 🏆 **3rd place at the [Cursor Austin × AITX Hackathon](https://luma.com/cursor-austin-grok-001)** (Austin, TX, September 19, 2026). Built during the event by [Mahesh Babu Gorantla](https://github.com/maheshbabugorantla), [Sreedhar Arolla](https://github.com/sreedhararolla), [Chase Young](https://github.com/Chaser263), and [Denis Popov](https://github.com/dennycrafter).
 
 **Find the block where your business belongs.** Hyperlocal scores every neighborhood for a small business on who lives there, who you'd compete with, and how busy the streets already are. Pick a location on evidence, not gut feel.
 
